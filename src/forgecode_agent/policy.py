@@ -22,7 +22,7 @@ class ApprovalPolicy:
     mode: ApprovalMode = ApprovalMode.SUPERVISED
     approved_actions: set[str] = field(default_factory=set)
 
-    def decide(self, *, tool_name: str, risk: str, arguments: dict[str, Any]) -> ApprovalDecision:
+    def decide(self, *, tool_name: str, risk: str, arguments: Any) -> ApprovalDecision:
         if risk == "read_only":
             return ApprovalDecision(True, False, "auto_allowed_read_only")
 
@@ -35,7 +35,10 @@ class ApprovalPolicy:
         return ApprovalDecision(False, True, "approval_required")
 
     @staticmethod
-    def _action_key(tool_name: str, arguments: dict[str, Any]) -> str:
+    def _action_key(tool_name: str, arguments: Any) -> str:
+        if not isinstance(arguments, dict):
+            return tool_name
+
         for key in ("command", "path", "message"):
             if key in arguments:
                 return f"{tool_name}:{arguments[key]}"
