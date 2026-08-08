@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from forgecode_agent import cli
 from forgecode_agent.cli import DoctorStatus, doctor_status
 
 
@@ -44,3 +47,48 @@ def test_doctor_status_reports_configured_provider(tmp_path, monkeypatch) -> Non
         "credentials": "ok",
     }
     assert status.messages == []
+
+
+def test_main_doctor_uses_current_working_directory(tmp_path, monkeypatch, capsys) -> None:
+    called_with: list[Path] = []
+
+    def fake_doctor_status(workspace: Path) -> DoctorStatus:
+        called_with.append(workspace)
+        return DoctorStatus(ok=True, workspace=workspace, checks={}, messages=[])
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "doctor_status", fake_doctor_status)
+
+    exit_code = cli.main(["doctor"])
+
+    assert exit_code == 0
+    assert called_with == [tmp_path]
+    assert capsys.readouterr().out == "ok\n"
+
+
+def test_main_doctor_workspace_option_uses_provided_workspace(tmp_path, monkeypatch, capsys) -> None:
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    called_with: list[Path] = []
+
+    def fake_doctor_status(workspace_arg: Path) -> DoctorStatus:
+        called_with.append(workspace_arg)
+        return DoctorStatus(ok=True, workspace=workspace_arg, checks={}, messages=[])
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "doctor_status", fake_doctor_status)
+
+    exit_code = cli.main(["doctor", "--workspace", str(workspace)])
+
+    assert exit_code == 0
+    assert called_with == [workspace]
+    assert capsys.readouterr().out == "ok\n"
+
+
+def test_main_unknown_command_returns_error(capsys) -> None:
+    exit_code = cli.main(["unknown"])
+
+    captured = capsys.readouterr()
+    assert exit_code != 0
+    assert "usage:" in captured.err
+    assert "unknown" in captured.err

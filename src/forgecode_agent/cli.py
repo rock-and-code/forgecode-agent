@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,7 +44,17 @@ def doctor_status(workspace: Path) -> DoctorStatus:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    status = doctor_status(Path.cwd())
+    parser = argparse.ArgumentParser(prog="forgecode")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    doctor_parser = subparsers.add_parser("doctor")
+    doctor_parser.add_argument("--workspace", type=Path, default=Path.cwd())
+
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return exc.code if isinstance(exc.code, int) else 1
+
+    status = doctor_status(args.workspace)
     print("ok" if status.ok else "not ok")
     for message in status.messages:
         print(message)
