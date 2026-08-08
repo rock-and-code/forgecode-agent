@@ -1,8 +1,39 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Any, Iterable
+
+
+DEFAULT_REDACT_KEYS = {
+    "access_key",
+    "api_key",
+    "auth",
+    "authorization",
+    "credential",
+    "passwd",
+    "password",
+    "private_key",
+    "secret",
+    "token",
+}
+REDACTED_VALUE = "[REDACTED]"
+
+
+def _redact(value: Any, redact_keys: Iterable[str]) -> Any:
+    key_fragments = tuple(fragment.lower() for fragment in redact_keys)
+    if isinstance(value, dict):
+        return {
+            key: REDACTED_VALUE if any(fragment in str(key).lower() for fragment in key_fragments) else _redact(item, key_fragments)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact(item, key_fragments) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact(item, key_fragments) for item in value)
+    return value
 
 
 @dataclass(frozen=True)
@@ -28,3 +59,13 @@ class RunLedger:
         event = LedgerEvent(type=event_type, data=deepcopy(data) if data is not None else {}, timestamp=len(self.events))
         self.events.append(event)
         return event
+
+    def write_jsonl(self, path: str | Path, *, redact_keys: set[str] | None = None) -> None:
+        output_path = Path(path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        key_fragments = DEFAULT_REDACT_KEYS if redact_keys is None else DEFAULT_REDACT_KEYS | redact_keys
+        with output_path.open("w", encoding="utf-8") as file:
+            for event in self.events:
+                row = event.to_dict() | {"run_id": self.run_id}
+                row["data"] = _redact(row["data"], key_fragments)
+                file.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
