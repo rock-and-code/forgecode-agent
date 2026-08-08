@@ -114,3 +114,45 @@ def test_agent_controller_stops_before_tool_execution_when_max_iterations_is_zer
         "completed": False,
         "stop_reason": "max_iterations",
     }
+
+
+def test_agent_controller_stops_without_tool_execution_when_model_returns_multiple_tool_calls(
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    ledger = RunLedger(run_id="multiple-tool-calls")
+    provider = FakeModelProvider(
+        script=[
+            AssistantMessage(
+                content="I need two tools.",
+                tool_intents=[
+                    ToolIntent(name="read_file", arguments={"path": "README.md"}),
+                    ToolIntent(name="read_file", arguments={"path": "pyproject.toml"}),
+                ],
+            )
+        ]
+    )
+    registry = read_only_registry.clone_empty_history()
+    controller = AgentController(
+        model_provider=provider,
+        tools=registry,
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+        max_iterations=1,
+    )
+
+    result = controller.run(goal="Read README.md and pyproject.toml")
+
+    assert result.final_answer == "I need two tools."
+    assert result.completed is False
+    assert result.iterations == 0
+    assert result.stop_reason == "multiple_tool_calls"
+    assert registry.calls == []
+    assert "tool_call_requested" not in [event.type for event in ledger.events]
+    assert "tool_call_completed" not in [event.type for event in ledger.events]
+    assert ledger.events[-1].type == "run_completed"
+    assert ledger.events[-1].data == {
+        "final_answer": "I need two tools.",
+        "completed": False,
+        "stop_reason": "multiple_tool_calls",
+    }

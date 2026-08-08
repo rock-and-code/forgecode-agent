@@ -34,6 +34,18 @@ class AgentController:
         first = self.model_provider.complete(messages=messages)
         self.ledger.append("model_responded", self._message_data(first))
 
+        if len(first.tool_intents) > 1:
+            self.ledger.append(
+                "run_completed",
+                {"final_answer": first.content, "completed": False, "stop_reason": "multiple_tool_calls"},
+            )
+            return AgentRunResult(
+                final_answer=first.content,
+                completed=False,
+                iterations=iterations,
+                stop_reason="multiple_tool_calls",
+            )
+
         if first.tool_intents and iterations >= self.max_iterations:
             self.ledger.append(
                 "run_completed",
