@@ -15,6 +15,54 @@ class DoctorStatus:
     messages: list[str]
 
 
+@dataclass(frozen=True)
+class WorkspaceStatus:
+    workspace: Path
+    workspace_state: str
+    config_state: str
+    active_task: str | None
+
+
+def _read_simple_toml_strings(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, raw_value = stripped.split("=", 1)
+        value = raw_value.strip()
+        if len(value) >= 2 and value[0] == value[-1] == '"':
+            values[key.strip()] = value[1:-1]
+    return values
+
+
+def workspace_status(workspace: Path) -> WorkspaceStatus:
+    workspace = Path(workspace)
+    workspace_ok = workspace.exists() and workspace.is_dir()
+    forge_dir = workspace / ".forge"
+    config_file = forge_dir / "config.toml"
+    active_task_file = forge_dir / "active-task.toml"
+
+    active_task: str | None = None
+    if active_task_file.exists():
+        task = _read_simple_toml_strings(active_task_file)
+        task_name = task.get("name")
+        task_path = task.get("path")
+        if task_name and task_path:
+            active_task = f"{task_name} ({task_path})"
+        elif task_name:
+            active_task = task_name
+        elif task_path:
+            active_task = task_path
+
+    return WorkspaceStatus(
+        workspace=workspace,
+        workspace_state="ok" if workspace_ok else "missing",
+        config_state="ok" if config_file.exists() else "missing",
+        active_task=active_task,
+    )
+
+
 def doctor_status(workspace: Path) -> DoctorStatus:
     workspace = Path(workspace)
     messages: list[str] = []
@@ -48,11 +96,20 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     doctor_parser = subparsers.add_parser("doctor")
     doctor_parser.add_argument("--workspace", type=Path, default=Path.cwd())
+    status_parser = subparsers.add_parser("status")
+    status_parser.add_argument("--workspace", type=Path, default=Path.cwd())
 
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else 1
+
+    if args.command == "status":
+        status = workspace_status(args.workspace)
+        print(f"workspace: {status.workspace_state}")
+        print(f"config: {status.config_state}")
+        print(f"active_task: {status.active_task or 'none'}")
+        return 0 if status.workspace_state == "ok" else 1
 
     status = doctor_status(args.workspace)
     print("ok" if status.ok else "not ok")

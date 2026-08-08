@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from forgecode_agent import cli
+from forgecode_agent.cli import WorkspaceStatus, workspace_status
+
+
+def test_workspace_status_reports_missing_config_and_no_active_task(tmp_path) -> None:
+    status = workspace_status(tmp_path)
+
+    assert isinstance(status, WorkspaceStatus)
+    assert status.workspace == tmp_path
+    assert status.workspace_state == "ok"
+    assert status.config_state == "missing"
+    assert status.active_task is None
+
+
+def test_workspace_status_reports_missing_workspace(tmp_path) -> None:
+    workspace = tmp_path / "missing"
+
+    status = workspace_status(workspace)
+
+    assert status.workspace == workspace
+    assert status.workspace_state == "missing"
+    assert status.config_state == "missing"
+    assert status.active_task is None
+
+
+def test_workspace_status_reports_config_and_active_task(tmp_path) -> None:
+    forge_dir = tmp_path / ".forge"
+    forge_dir.mkdir()
+    (forge_dir / "config.toml").write_text('model_provider = "fake"\n', encoding="utf-8")
+    (forge_dir / "active-task.toml").write_text(
+        'path = "tasks/001-build-status.md"\nname = "Build status"\n',
+        encoding="utf-8",
+    )
+
+    status = workspace_status(tmp_path)
+
+    assert status.workspace_state == "ok"
+    assert status.config_state == "ok"
+    assert status.active_task == "Build status (tasks/001-build-status.md)"
+
+
+def test_main_status_workspace_option_uses_provided_workspace(tmp_path, monkeypatch, capsys) -> None:
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    called_with: list[Path] = []
+
+    def fake_workspace_status(workspace_arg: Path) -> WorkspaceStatus:
+        called_with.append(workspace_arg)
+        return WorkspaceStatus(
+            workspace=workspace_arg,
+            workspace_state="ok",
+            config_state="missing",
+            active_task=None,
+        )
+
+    monkeypatch.setattr(cli, "workspace_status", fake_workspace_status)
+
+    exit_code = cli.main(["status", "--workspace", str(workspace)])
+
+    assert exit_code == 0
+    assert called_with == [workspace]
+    assert capsys.readouterr().out == "workspace: ok\nconfig: missing\nactive_task: none\n"
