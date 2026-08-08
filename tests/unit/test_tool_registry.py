@@ -37,7 +37,7 @@ def test_tool_registry_applies_approval_policy_before_handler_runs() -> None:
             name="write_file",
             risk="write",
             description="Write a file in the workspace.",
-            parameters={"type": "object"},
+            parameters={"type": "object", "additionalProperties": True},
             handler=lambda path, content: calls.append(path),
         )
     )
@@ -52,3 +52,173 @@ def test_tool_registry_applies_approval_policy_before_handler_runs() -> None:
         "status": "denied",
         "reason": "approval_required",
     }
+
+
+def test_tool_registry_denies_missing_required_arguments_before_handler_runs(
+    read_file_tool: ToolDefinition,
+) -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name=read_file_tool.name,
+            risk=read_file_tool.risk,
+            description=read_file_tool.description,
+            parameters=read_file_tool.parameters,
+            handler=lambda path: calls.append({"path": path}),
+        )
+    )
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("read_file", {})
+
+    assert calls == []
+    assert registry.calls == [
+        {"tool": "read_file", "arguments": {}, "status": "denied", "reason": "invalid_arguments"}
+    ]
+
+
+def test_tool_registry_denies_argument_type_mismatch_before_handler_runs(
+    read_file_tool: ToolDefinition,
+) -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name=read_file_tool.name,
+            risk=read_file_tool.risk,
+            description=read_file_tool.description,
+            parameters=read_file_tool.parameters,
+            handler=lambda path: calls.append({"path": path}),
+        )
+    )
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("read_file", {"path": 123})
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "read_file",
+            "arguments": {"path": 123},
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize("arguments", [None, ["README.md"], "README.md"])
+def test_tool_registry_denies_non_dict_arguments_before_handler_runs(
+    read_file_tool: ToolDefinition,
+    arguments: object,
+) -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name=read_file_tool.name,
+            risk=read_file_tool.risk,
+            description=read_file_tool.description,
+            parameters=read_file_tool.parameters,
+            handler=lambda path: calls.append({"path": path}),
+        )
+    )
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("read_file", arguments)  # type: ignore[arg-type]
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "read_file",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_denies_unknown_extra_arguments_before_handler_runs(
+    read_file_tool: ToolDefinition,
+) -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name=read_file_tool.name,
+            risk=read_file_tool.risk,
+            description=read_file_tool.description,
+            parameters=read_file_tool.parameters,
+            handler=lambda path: calls.append({"path": path}),
+        )
+    )
+    arguments = {"path": "README.md", "extra": "x"}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("read_file", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "read_file",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_denies_unknown_arguments_for_object_schema_before_handler_runs() -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="ping",
+            risk="read_only",
+            description="Ping with no arguments.",
+            parameters={"type": "object"},
+            handler=lambda: calls.append({"called": "yes"}),
+        )
+    )
+    arguments = {"unexpected": "value"}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("ping", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "ping",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_denies_unknown_arguments_for_empty_schema_before_handler_runs() -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="ping",
+            risk="read_only",
+            description="Ping with no arguments.",
+            parameters={},
+            handler=lambda: calls.append({"called": "yes"}),
+        )
+    )
+    arguments = {"unexpected": "value"}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("ping", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "ping",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]

@@ -30,11 +30,15 @@ class ToolRegistry:
     def register(self, tool: ToolDefinition) -> None:
         self._tools[tool.name] = tool
 
-    def execute(self, name: str, arguments: dict[str, Any]) -> Any:
+    def execute(self, name: str, arguments: Any) -> Any:
         tool = self._tools.get(name)
         if tool is None:
             self.calls.append({"tool": name, "arguments": arguments, "status": "denied", "reason": "unknown_tool"})
             raise ToolCallDenied(f"Unknown tool: {name}")
+
+        if not _arguments_match_schema(tool.parameters, arguments):
+            self.calls.append({"tool": name, "arguments": arguments, "status": "denied", "reason": "invalid_arguments"})
+            raise ToolCallDenied(f"Tool call denied: {name} invalid_arguments")
 
         if self.approval_policy is not None:
             decision = self.approval_policy.decide(tool_name=name, risk=tool.risk, arguments=arguments)
@@ -55,3 +59,25 @@ class ToolRegistry:
         for tool in self._tools.values():
             clone.register(tool)
         return clone
+
+
+def _arguments_match_schema(schema: dict[str, Any], arguments: Any) -> bool:
+    if not isinstance(arguments, dict):
+        return False
+
+    for required_name in schema.get("required", []):
+        if required_name not in arguments:
+            return False
+
+    properties = schema.get("properties", {})
+    if schema.get("additionalProperties") is not True:
+        for name in arguments:
+            if name not in properties:
+                return False
+
+    for name, value in arguments.items():
+        expected_type = properties.get(name, {}).get("type")
+        if expected_type == "string" and not isinstance(value, str):
+            return False
+
+    return True
