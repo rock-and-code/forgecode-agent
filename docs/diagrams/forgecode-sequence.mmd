@@ -1,0 +1,73 @@
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant UI as CLI/TUI
+    participant App as Session Controller
+    participant PE as Policy Engine
+    participant AR as Agent Runtime
+    participant CS as Context Service
+    participant MP as Model Provider
+    participant SA as Subagent Coordinator
+    participant PM as Patch Manager
+    participant SB as Sandbox Executor
+    participant GT as Git/Worktree Manager
+    participant LOG as Event Log
+
+    U->>UI: Request coding task
+    UI->>App: Start/resume session
+    App->>GT: Read branch, HEAD, dirty status
+    GT-->>App: Repository state
+    App->>PE: Evaluate mode and permissions
+    PE-->>App: Approval requirements
+    App->>AR: Run task with policy and repo state
+    AR->>CS: Build relevant context
+    CS-->>AR: Files, symbols, tests, memories
+    AR->>MP: Ask for plan with grounded context
+    MP-->>AR: Structured plan
+    AR->>LOG: Record plan event
+
+    alt Plan or action needs approval
+        AR-->>App: Approval request with scope/risk
+        App-->>UI: Display approval prompt
+        U->>UI: Approve / deny / revise
+        UI->>App: Decision
+        App->>PE: Record decision
+    end
+
+    opt Parallel bounded delegation
+        AR->>SA: Dispatch Scout/Verifier/Reviewer packets
+        SA->>CS: Read/search allowed context
+        SA->>MP: Specialized reasoning calls
+        SA-->>AR: Findings and patch proposals
+        AR->>LOG: Record subagent results
+    end
+
+    AR->>PM: Create minimal patch proposal
+    PM->>GT: Check file freshness and checkpoint
+    GT-->>PM: Safe to apply or conflict
+    PM-->>AR: Diff preview
+
+    alt Patch permitted
+        AR->>PM: Apply patch
+        PM->>GT: Update working tree/checkpoint metadata
+        PM-->>AR: Applied diff
+    else Conflict or denied
+        PM-->>AR: Rebase required or stop reason
+    end
+
+    AR->>SB: Run verification command under sandbox policy
+    SB->>PE: Check command/network/write permission
+    PE-->>SB: Allow / require approval / deny
+    SB-->>AR: Exit code, output, diagnostics
+    AR->>LOG: Record command result
+
+    alt Verification failed and budget remains
+        AR->>MP: Diagnose failure and repair plan
+        MP-->>AR: Repair action
+        AR->>PM: Apply repair patch
+        AR->>SB: Re-run targeted verification
+    end
+
+    AR-->>App: Final result summary, diff, verification status
+    App-->>UI: Render final response
+    UI-->>U: Changes, tests, risks, next steps

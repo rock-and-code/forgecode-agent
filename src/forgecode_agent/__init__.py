@@ -1,0 +1,1 @@
+"""Minimal ForgeCode Agent core."""

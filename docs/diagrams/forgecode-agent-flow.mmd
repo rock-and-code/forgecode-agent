@@ -1,0 +1,45 @@
+flowchart TD
+    A([User task received]) --> B[Intake\nrequest + repo + git status]
+    B --> C{Task requires code changes?}
+    C -- No --> D[Build read-only context]
+    D --> E[Answer / explain / review]
+    E --> Z([Complete])
+
+    C -- Yes --> F[Build context\nfiles + symbols + tests + memory]
+    F --> G[Plan\ntargets + tools + risks + verification]
+    G --> H{Approval required?}
+    H -- Yes --> I[Show plan/action scope]
+    I --> J{User approves?}
+    J -- No --> K[Revise plan or stop]
+    K --> Z
+    H -- No --> L[Execute next action]
+    J -- Yes --> L
+
+    L --> M{Action type}
+    M -- Read/Search --> N[Context tool]
+    M -- Patch --> O[Patch proposal]
+    M -- Shell/Test --> P[Sandbox command]
+    M -- Delegate --> Q[Subagent task packet]
+
+    N --> R[Update trace + context]
+    O --> S{Patch safe to apply?}
+    S -- No --> T[Re-read/rebase or request approval]
+    T --> R
+    S -- Yes --> U[Apply patch + git checkpoint]
+    U --> R
+    P --> V[Capture output + diagnostics]
+    V --> R
+    Q --> W[Collect structured findings / patch proposal]
+    W --> R
+
+    R --> X{Plan complete?}
+    X -- No --> L
+    X -- Yes --> Y[Verify\ntests + lint + diff review]
+    Y --> AA{Verification passed?}
+    AA -- Yes --> AB[Summarize changes\nverification + risks]
+    AB --> Z
+    AA -- No --> AC{Budget remains?}
+    AC -- Yes --> AD[Repair loop\nclassify failure + update plan]
+    AD --> L
+    AC -- No --> AE[Stop with failure report\nlogs + next actions]
+    AE --> Z

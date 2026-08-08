@@ -1,0 +1,49 @@
+flowchart LR
+    User[Developer / Maintainer]
+    Repo[(Local Git Repository)]
+    Config[(User + Repo Config)]
+    Memory[(Project and Session Memory)]
+    Providers[Model Providers\nHosted or Local]
+    Plugins[Plugins\nTools / Context / Subagents]
+    Shell[Local Shell / Sandbox]
+    Git[Git / Worktrees]
+    CI[Optional CI / Remote Checks]
+
+    subgraph ForgeCode[ForgeCode Agent]
+        CLI[CLI]
+        TUI[Optional TUI]
+        App[Session Controller\nApprovals + Use Cases]
+        Runtime[Agent Runtime\nLoop + Coordinator]
+        Context[Context Service\nRepo Map + Retrieval]
+        Policy[Policy Engine\nPermissions + Risk]
+        Patch[Patch Manager\nDiffs + Apply + Revert]
+        Sandbox[Sandbox Executor\nCommands + Logs]
+        Obs[Observability\nEvents + JSONL Traces]
+        Registry[Plugin Registry]
+    end
+
+    User --> CLI
+    User --> TUI
+    CLI --> App
+    TUI --> App
+    App --> Runtime
+    App --> Policy
+    Runtime --> Context
+    Runtime --> Patch
+    Runtime --> Sandbox
+    Runtime --> Registry
+    Runtime --> Obs
+    Context --> Repo
+    Context --> Memory
+    Context --> Config
+    Runtime --> Providers
+    Registry --> Plugins
+    Policy --> Sandbox
+    Policy --> Patch
+    Patch --> Repo
+    Patch --> Git
+    Sandbox --> Shell
+    Sandbox --> Repo
+    Sandbox --> CI
+    Obs --> Memory
+    Git --> Repo
