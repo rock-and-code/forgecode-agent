@@ -46,6 +46,20 @@ def test_workspace_status_reports_config_and_active_task(tmp_path) -> None:
     assert status.active_task == "Build status (tasks/001-build-status.md)"
 
 
+def test_workspace_status_ignores_active_task_decode_error(tmp_path) -> None:
+    forge_dir = tmp_path / ".forge"
+    forge_dir.mkdir()
+    (forge_dir / "config.toml").write_text('model_provider = "fake"\n', encoding="utf-8")
+    (forge_dir / "active-task.toml").write_bytes(b'\xffname = "Build status"\n')
+
+    status = workspace_status(tmp_path)
+
+    assert status.workspace_state == "ok"
+    assert status.config_state == "ok"
+    assert status.model_provider == "fake"
+    assert status.active_task is None
+
+
 def test_workspace_status_treats_config_directory_as_missing(tmp_path) -> None:
     forge_dir = tmp_path / ".forge"
     forge_dir.mkdir()

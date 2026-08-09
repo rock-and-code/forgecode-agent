@@ -52,7 +52,10 @@ def workspace_status(workspace: Path) -> WorkspaceStatus:
 
     active_task: str | None = None
     if active_task_file.exists():
-        task = _read_simple_toml_strings(active_task_file)
+        try:
+            task = _read_simple_toml_strings(active_task_file)
+        except (OSError, UnicodeDecodeError):
+            task = {}
         task_name = task.get("name")
         task_path = task.get("path")
         if task_name and task_path:
