@@ -1,0 +1,97 @@
+[
+  {
+    "data": {
+      "goal": "Summarize README.md"
+    },
+    "type": "run_started"
+  },
+  {
+    "data": {
+      "messages": [
+        {
+          "content": "Summarize README.md",
+          "role": "user"
+        }
+      ]
+    },
+    "type": "model_requested"
+  },
+  {
+    "data": {
+      "content": "I need to inspect the README first.",
+      "tool_intents": [
+        {
+          "arguments": {
+            "path": "README.md"
+          },
+          "name": "read_file"
+        }
+      ]
+    },
+    "type": "model_responded"
+  },
+  {
+    "data": {
+      "arguments": {
+        "path": "README.md"
+      },
+      "tool": "read_file"
+    },
+    "type": "tool_call_requested"
+  },
+  {
+    "data": {
+      "allowed": true,
+      "reason": "auto_allowed_read_only",
+      "tool": "read_file"
+    },
+    "type": "policy_decision"
+  },
+  {
+    "data": {
+      "result": {
+        "content": "# ForgeCode\nMinimal fixture README.\n",
+        "path": "README.md"
+      },
+      "tool": "read_file"
+    },
+    "type": "tool_call_completed"
+  },
+  {
+    "data": {
+      "messages": [
+        {
+          "content": "Summarize README.md",
+          "role": "user"
+        },
+        {
+          "content": "I need to inspect the README first.",
+          "role": "assistant"
+        },
+        {
+          "content": {
+            "content": "# ForgeCode\nMinimal fixture README.\n",
+            "path": "README.md"
+          },
+          "name": "read_file",
+          "role": "tool"
+        }
+      ]
+    },
+    "type": "model_requested"
+  },
+  {
+    "data": {
+      "content": "README.md says this is the minimal fixture project.",
+      "tool_intents": []
+    },
+    "type": "model_responded"
+  },
+  {
+    "data": {
+      "completed": true,
+      "final_answer": "README.md says this is the minimal fixture project."
+    },
+    "type": "run_completed"
+  }
+]

@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from forgecode_agent.agent import AgentController
 from forgecode_agent.ledger import RunLedger
 from forgecode_agent.models import AssistantMessage, FakeModelProvider, ToolIntent
 from forgecode_agent.policy import ApprovalPolicy
 from forgecode_agent.tools import ToolDefinition, ToolRegistry
+
+
+GOLDEN_DIR = Path(__file__).parents[1] / "golden"
 
 
 def test_agent_controller_runs_one_iteration_records_events_and_returns_final_answer(
@@ -195,6 +201,35 @@ def test_agent_controller_is_deterministic_for_same_script(
         return [event.to_dict(exclude={"timestamp"}) for event in ledger.events]
 
     assert run_once() == run_once()
+
+
+def test_agent_controller_read_loop_matches_golden_transcript(
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    ledger = RunLedger(run_id="deterministic-read-loop")
+    provider = FakeModelProvider(
+        script=[
+            AssistantMessage(
+                content="I need to inspect the README first.",
+                tool_intents=[ToolIntent(name="read_file", arguments={"path": "README.md"})],
+            ),
+            AssistantMessage(content="README.md says this is the minimal fixture project."),
+        ]
+    )
+    controller = AgentController(
+        model_provider=provider,
+        tools=read_only_registry.clone_empty_history(),
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+        max_iterations=1,
+    )
+
+    controller.run(goal="Summarize README.md")
+
+    actual_transcript = [event.to_dict(exclude={"timestamp"}) for event in ledger.events]
+    golden_transcript = json.loads((GOLDEN_DIR / "deterministic_read_loop.json").read_text(encoding="utf-8"))
+    assert actual_transcript == golden_transcript
 
 
 def test_agent_controller_stops_before_tool_execution_when_max_iterations_is_zero(
