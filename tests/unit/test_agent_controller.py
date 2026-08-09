@@ -531,8 +531,10 @@ def test_agent_controller_stops_safely_when_non_read_only_tool_arguments_are_not
         "model_responded",
         "tool_call_requested",
         "policy_decision",
+        "tool_call_failed",
         "run_completed",
     ]
+    assert ledger.events[5].data == {"tool": "run_shell", "reason": "invalid_arguments"}
     assert ledger.events[-1].data == {
         "final_answer": "I need to run a command.",
         "completed": False,
@@ -656,10 +658,70 @@ def test_agent_controller_stops_safely_when_tool_arguments_are_malformed(
         "model_responded",
         "tool_call_requested",
         "policy_decision",
+        "tool_call_failed",
         "run_completed",
     ]
+    assert ledger.events[5].data == {"tool": "read_file", "reason": "invalid_arguments"}
     assert ledger.events[-1].data == {
         "final_answer": "I need to inspect the README first.",
+        "completed": False,
+        "stop_reason": "invalid_tool_arguments",
+    }
+
+
+def test_agent_controller_records_sanitized_tool_call_failed_for_invalid_arguments(
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    handler_calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="read_file",
+            risk="read_only",
+            description="Read a UTF-8 text file from the workspace.",
+            parameters={"type": "object", "required": ["path"], "properties": {"path": {"type": "string"}}},
+            handler=lambda path: handler_calls.append({"path": path}),
+        )
+    )
+    ledger = RunLedger(run_id="invalid-tool-arguments-ledger")
+    provider = FakeModelProvider(
+        script=[
+            AssistantMessage(
+                content="I need to inspect a secret path.",
+                tool_intents=[ToolIntent(name="read_file", arguments={"path": 123, "token": "secret-token-123"})],
+            ),
+            AssistantMessage(content="This response must not be requested."),
+        ]
+    )
+    controller = AgentController(
+        model_provider=provider,
+        tools=registry,
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+        max_iterations=1,
+    )
+
+    result = controller.run(goal="Read a sensitive path")
+
+    assert result.final_answer == "I need to inspect a secret path."
+    assert result.completed is False
+    assert result.iterations == 1
+    assert result.stop_reason == "invalid_tool_arguments"
+    assert handler_calls == []
+    assert len(provider.requests) == 1
+    assert [event.type for event in ledger.events] == [
+        "run_started",
+        "model_requested",
+        "model_responded",
+        "tool_call_requested",
+        "policy_decision",
+        "tool_call_failed",
+        "run_completed",
+    ]
+    assert ledger.events[5].data == {"tool": "read_file", "reason": "invalid_arguments"}
+    assert "secret-token-123" not in json.dumps(ledger.events[5].data)
+    assert ledger.events[-1].data == {
+        "final_answer": "I need to inspect a secret path.",
         "completed": False,
         "stop_reason": "invalid_tool_arguments",
     }

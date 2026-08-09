@@ -93,7 +93,7 @@ class AgentController:
                         "policy_decision",
                         {"tool": intent.name, "allowed": False, "reason": "invalid_arguments"},
                     )
-                    return self._invalid_tool_arguments_result(response, iterations)
+                    return self._invalid_tool_arguments_result(response, iterations, intent.name)
 
             risk = tool.risk
             decision = self.approval_policy.decide(tool_name=intent.name, risk=risk, arguments=intent.arguments)
@@ -109,7 +109,7 @@ class AgentController:
             except ToolCallDenied as exc:
                 if exc.reason != "invalid_arguments":
                     raise
-                return self._invalid_tool_arguments_result(response, iterations)
+                return self._invalid_tool_arguments_result(response, iterations, intent.name)
             except ToolExecutionError as exc:
                 return self._tool_error_result(response, iterations, exc)
             self.ledger.append("tool_call_completed", {"tool": intent.name, "result": result})
@@ -155,7 +155,11 @@ class AgentController:
             stop_reason=reason,
         )
 
-    def _invalid_tool_arguments_result(self, message: AssistantMessage, iterations: int) -> AgentRunResult:
+    def _invalid_tool_arguments_result(self, message: AssistantMessage, iterations: int, tool_name: str) -> AgentRunResult:
+        self.ledger.append(
+            "tool_call_failed",
+            {"tool": tool_name, "reason": "invalid_arguments"},
+        )
         self.ledger.append(
             "run_completed",
             {"final_answer": message.content, "completed": False, "stop_reason": "invalid_tool_arguments"},
