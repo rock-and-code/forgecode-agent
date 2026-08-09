@@ -13,6 +13,7 @@ def test_workspace_status_reports_missing_config_and_no_active_task(tmp_path) ->
     assert status.workspace == tmp_path
     assert status.workspace_state == "ok"
     assert status.config_state == "missing"
+    assert status.model_provider is None
     assert status.active_task is None
 
 
@@ -24,6 +25,7 @@ def test_workspace_status_reports_missing_workspace(tmp_path) -> None:
     assert status.workspace == workspace
     assert status.workspace_state == "missing"
     assert status.config_state == "missing"
+    assert status.model_provider is None
     assert status.active_task is None
 
 
@@ -40,7 +42,20 @@ def test_workspace_status_reports_config_and_active_task(tmp_path) -> None:
 
     assert status.workspace_state == "ok"
     assert status.config_state == "ok"
+    assert status.model_provider == "fake"
     assert status.active_task == "Build status (tasks/001-build-status.md)"
+
+
+def test_workspace_status_treats_config_directory_as_missing(tmp_path) -> None:
+    forge_dir = tmp_path / ".forge"
+    forge_dir.mkdir()
+    (forge_dir / "config.toml").mkdir()
+
+    status = workspace_status(tmp_path)
+
+    assert status.workspace_state == "ok"
+    assert status.config_state == "missing"
+    assert status.model_provider is None
 
 
 def test_main_status_workspace_option_uses_provided_workspace(tmp_path, monkeypatch, capsys) -> None:
@@ -54,6 +69,7 @@ def test_main_status_workspace_option_uses_provided_workspace(tmp_path, monkeypa
             workspace=workspace_arg,
             workspace_state="ok",
             config_state="missing",
+            model_provider=None,
             active_task=None,
         )
 
@@ -63,4 +79,17 @@ def test_main_status_workspace_option_uses_provided_workspace(tmp_path, monkeypa
 
     assert exit_code == 0
     assert called_with == [workspace]
-    assert capsys.readouterr().out == "workspace: ok\nconfig: missing\nactive_task: none\n"
+    assert capsys.readouterr().out == (
+        "workspace: ok\nconfig: missing\nmodel_provider: none\nactive_task: none\n"
+    )
+
+
+def test_main_status_prints_configured_model_provider(tmp_path, capsys) -> None:
+    forge_dir = tmp_path / ".forge"
+    forge_dir.mkdir()
+    (forge_dir / "config.toml").write_text('model_provider = "fake"\n', encoding="utf-8")
+
+    exit_code = cli.main(["status", "--workspace", str(tmp_path)])
+
+    assert exit_code == 0
+    assert "model_provider: fake\n" in capsys.readouterr().out

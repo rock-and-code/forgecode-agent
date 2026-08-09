@@ -20,6 +20,7 @@ class WorkspaceStatus:
     workspace: Path
     workspace_state: str
     config_state: str
+    model_provider: str | None
     active_task: str | None
 
 
@@ -43,6 +44,12 @@ def workspace_status(workspace: Path) -> WorkspaceStatus:
     config_file = forge_dir / "config.toml"
     active_task_file = forge_dir / "active-task.toml"
 
+    model_provider: str | None = None
+    config_file_ok = config_file.is_file()
+    if config_file_ok:
+        config = _read_simple_toml_strings(config_file)
+        model_provider = config.get("model_provider")
+
     active_task: str | None = None
     if active_task_file.exists():
         task = _read_simple_toml_strings(active_task_file)
@@ -58,7 +65,8 @@ def workspace_status(workspace: Path) -> WorkspaceStatus:
     return WorkspaceStatus(
         workspace=workspace,
         workspace_state="ok" if workspace_ok else "missing",
-        config_state="ok" if config_file.exists() else "missing",
+        config_state="ok" if config_file_ok else "missing",
+        model_provider=model_provider,
         active_task=active_task,
     )
 
@@ -108,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         status = workspace_status(args.workspace)
         print(f"workspace: {status.workspace_state}")
         print(f"config: {status.config_state}")
+        print(f"model_provider: {status.model_provider or 'none'}")
         print(f"active_task: {status.active_task or 'none'}")
         return 0 if status.workspace_state == "ok" else 1
 
