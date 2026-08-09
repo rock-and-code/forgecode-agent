@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from forgecode_agent.agent import AgentController
 from forgecode_agent.ledger import RunLedger
 from forgecode_agent.models import AssistantMessage, FakeModelProvider, ToolIntent
@@ -268,6 +270,22 @@ def test_agent_controller_stops_before_tool_execution_when_max_iterations_is_zer
         "completed": False,
         "stop_reason": "max_iterations",
     }
+
+
+def test_agent_controller_rejects_negative_max_iterations(
+    scripted_read_then_answer_model: FakeModelProvider,
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+    run_ledger: RunLedger,
+) -> None:
+    with pytest.raises(ValueError, match=r"max_iterations.*non-negative"):
+        AgentController(
+            model_provider=scripted_read_then_answer_model,
+            tools=read_only_registry,
+            approval_policy=auto_read_policy,
+            ledger=run_ledger,
+            max_iterations=-1,
+        )
 
 
 def test_agent_controller_stops_without_tool_execution_when_model_returns_multiple_tool_calls(

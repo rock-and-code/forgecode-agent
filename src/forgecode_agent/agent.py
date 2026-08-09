@@ -25,6 +25,10 @@ class AgentController:
     ledger: RunLedger
     max_iterations: int = 1
 
+    def __post_init__(self) -> None:
+        if self.max_iterations < 0:
+            raise ValueError("max_iterations must be non-negative")
+
     def run(self, goal: str) -> AgentRunResult:
         self.ledger.append("run_started", {"goal": goal})
         messages: list[dict[str, Any]] = [{"role": "user", "content": goal}]
