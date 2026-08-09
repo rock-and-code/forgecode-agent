@@ -90,7 +90,7 @@ class AgentController:
                 {"tool": intent.name, "allowed": decision.allowed, "reason": decision.reason},
             )
             if not decision.allowed:
-                raise ToolCallDenied(f"Tool call denied: {intent.name} {decision.reason}", reason=decision.reason)
+                return self._policy_denied_result(first, iterations, decision.reason)
 
             try:
                 result = self.tools.execute(intent.name, intent.arguments)
@@ -124,6 +124,18 @@ class AgentController:
             completed=False,
             iterations=iterations,
             stop_reason="unknown_tool",
+        )
+
+    def _policy_denied_result(self, message: AssistantMessage, iterations: int, reason: str) -> AgentRunResult:
+        self.ledger.append(
+            "run_completed",
+            {"final_answer": message.content, "completed": False, "stop_reason": reason},
+        )
+        return AgentRunResult(
+            final_answer=message.content,
+            completed=False,
+            iterations=iterations,
+            stop_reason=reason,
         )
 
     def _invalid_tool_arguments_result(self, message: AssistantMessage, iterations: int) -> AgentRunResult:

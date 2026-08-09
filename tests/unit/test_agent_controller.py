@@ -322,6 +322,71 @@ def test_agent_controller_stops_safely_when_non_read_only_tool_arguments_are_not
     }
 
 
+def test_agent_controller_stops_safely_when_supervised_policy_denies_known_shell_tool(
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    handler_calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="run_shell",
+            risk="shell",
+            description="Run a shell command.",
+            parameters={
+                "type": "object",
+                "required": ["command"],
+                "properties": {"command": {"type": "string"}},
+            },
+            handler=lambda command: handler_calls.append({"command": command}),
+        )
+    )
+    ledger = RunLedger(run_id="supervised-policy-denies-known-shell-tool")
+    provider = FakeModelProvider(
+        script=[
+            AssistantMessage(
+                content="I need to run a command.",
+                tool_intents=[ToolIntent(name="run_shell", arguments={"command": "ls"})],
+            ),
+            AssistantMessage(content="This response must not be requested."),
+        ]
+    )
+    controller = AgentController(
+        model_provider=provider,
+        tools=registry,
+        approval_policy=ApprovalPolicy(mode=auto_read_policy.mode, approved_actions=set()),
+        ledger=ledger,
+        max_iterations=1,
+    )
+
+    result = controller.run(goal="Run ls")
+
+    assert result.final_answer == "I need to run a command."
+    assert result.completed is False
+    assert result.iterations == 1
+    assert result.stop_reason == "approval_required"
+    assert handler_calls == []
+    assert registry.calls == []
+    assert len(provider.requests) == 1
+    assert [event.type for event in ledger.events] == [
+        "run_started",
+        "model_requested",
+        "model_responded",
+        "tool_call_requested",
+        "policy_decision",
+        "run_completed",
+    ]
+    assert ledger.events[4].data == {
+        "tool": "run_shell",
+        "allowed": False,
+        "reason": "approval_required",
+    }
+    assert ledger.events[-1].data == {
+        "final_answer": "I need to run a command.",
+        "completed": False,
+        "stop_reason": "approval_required",
+    }
+
+
 def test_agent_controller_stops_safely_when_tool_arguments_are_malformed(
     auto_read_policy: ApprovalPolicy,
 ) -> None:
