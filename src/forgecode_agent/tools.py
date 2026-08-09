@@ -124,6 +124,18 @@ def _arguments_match_schema(schema: dict[str, Any], arguments: Any) -> bool:
             return False
         if "enum" in property_schema and value not in property_schema["enum"]:
             return False
+        if (
+            expected_type == "string"
+            and "minLength" in property_schema
+            and len(value) < property_schema["minLength"]
+        ):
+            return False
+        if (
+            expected_type == "string"
+            and "maxLength" in property_schema
+            and len(value) > property_schema["maxLength"]
+        ):
+            return False
 
     return True
 

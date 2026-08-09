@@ -572,6 +572,69 @@ def test_tool_registry_denies_object_property_string_not_in_enum_before_handler_
     ]
 
 
+@pytest.mark.parametrize("arguments", [{"name": "ab"}, {"name": "abcdef"}])
+def test_tool_registry_denies_object_property_string_length_constraints_before_handler_runs(
+    arguments: dict[str, str],
+) -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="rename",
+            risk="read_only",
+            description="Rename an item.",
+            parameters={
+                "type": "object",
+                "properties": {"name": {"type": "string", "minLength": 3, "maxLength": 5}},
+                "required": ["name"],
+            },
+            handler=lambda name: calls.append({"name": name}),
+        )
+    )
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("rename", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "rename",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize("name", ["abc", "abcd", "abcde"])
+def test_tool_registry_allows_object_property_string_length_boundaries(
+    name: str,
+) -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="rename",
+            risk="read_only",
+            description="Rename an item.",
+            parameters={
+                "type": "object",
+                "properties": {"name": {"type": "string", "minLength": 3, "maxLength": 5}},
+                "required": ["name"],
+            },
+            handler=lambda name: calls.append({"name": name}),
+        )
+    )
+
+    result = registry.execute("rename", {"name": name})
+
+    assert result is None
+    assert calls == [{"name": name}]
+    assert registry.calls == [
+        {"tool": "rename", "arguments": {"name": name}, "status": "completed"}
+    ]
+
+
 def test_tool_registry_denies_unknown_arguments_for_empty_schema_before_handler_runs() -> None:
     calls: list[dict[str, str]] = []
     registry = ToolRegistry()
