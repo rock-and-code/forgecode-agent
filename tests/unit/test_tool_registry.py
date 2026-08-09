@@ -508,6 +508,38 @@ def test_tool_registry_denies_unknown_arguments_for_object_schema_before_handler
     ]
 
 
+def test_tool_registry_denies_object_property_string_not_in_enum_before_handler_runs() -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="run_mode",
+            risk="read_only",
+            description="Run in a configured mode.",
+            parameters={
+                "type": "object",
+                "properties": {"mode": {"type": "string", "enum": ["fast", "safe"]}},
+                "required": ["mode"],
+            },
+            handler=lambda mode: calls.append({"mode": mode}),
+        )
+    )
+    arguments = {"mode": "unsafe"}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("run_mode", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "run_mode",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
 def test_tool_registry_denies_unknown_arguments_for_empty_schema_before_handler_runs() -> None:
     calls: list[dict[str, str]] = []
     registry = ToolRegistry()

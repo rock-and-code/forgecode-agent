@@ -118,8 +118,11 @@ def _arguments_match_schema(schema: dict[str, Any], arguments: Any) -> bool:
                 return False
 
     for name, value in arguments.items():
-        expected_type = properties.get(name, {}).get("type")
+        property_schema = properties.get(name, {})
+        expected_type = property_schema.get("type")
         if not _value_matches_type(value, expected_type):
+            return False
+        if "enum" in property_schema and value not in property_schema["enum"]:
             return False
 
     return True
