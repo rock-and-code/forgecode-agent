@@ -84,6 +84,28 @@ def test_read_jsonl_rejects_mixed_run_ids(tmp_path) -> None:
         raise AssertionError("Expected ValueError for mixed run_id JSONL ledger")
 
 
+def test_read_jsonl_rejects_non_contiguous_timestamps_in_file_order(tmp_path) -> None:
+    output_path = tmp_path / "non-contiguous.jsonl"
+    output_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "one", "data": {}, "timestamp": 0, "run_id": "same"}),
+                json.dumps({"type": "two", "data": {}, "timestamp": 2, "run_id": "same"}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    try:
+        RunLedger.read_jsonl(output_path)
+    except ValueError as exc:
+        message = str(exc).lower()
+        assert "timestamp" in message and ("order" in message or "contiguous" in message)
+    else:
+        raise AssertionError("Expected ValueError for non-contiguous JSONL ledger timestamps")
+
+
 def test_write_jsonl_redacts_default_secret_keys_recursively_without_mutating_events(tmp_path) -> None:
     ledger = RunLedger(run_id="redaction-test")
     sensitive_payload = {

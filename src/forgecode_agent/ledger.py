@@ -85,6 +85,8 @@ class RunLedger:
         run_id = rows[0]["run_id"]
         if any(row["run_id"] != run_id for row in rows):
             raise ValueError("Cannot read JSONL ledger with mixed run_id rows")
+        if [row["timestamp"] for row in rows] != list(range(len(rows))):
+            raise ValueError("Cannot read JSONL ledger with non-contiguous timestamps in file order")
 
         ledger = cls(run_id=run_id)
         ledger.events = [LedgerEvent(type=row["type"], data=row["data"], timestamp=row["timestamp"]) for row in rows]
