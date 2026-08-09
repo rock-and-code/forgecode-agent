@@ -96,6 +96,8 @@ class ToolRegistry:
 
 
 def _arguments_match_schema(schema: dict[str, Any], arguments: Any) -> bool:
+    if not _array_contains_keywords_are_valid(schema):
+        return False
     if not _any_of_matches_schema(arguments, schema, enforce_string_pattern=True):
         return False
     if _is_any_of_only_schema(schema):
@@ -139,8 +141,92 @@ def _array_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
         return False
     if schema.get("uniqueItems") is True and not _array_items_are_unique(value):
         return False
+    if "contains" in schema and not _array_contains_matches(value, schema):
+        return False
     item_schema = schema.get("items", {})
     return all(_value_matches_schema(item, item_schema, enforce_string_pattern=True) for item in value)
+
+
+def _array_contains_matches(value: list[Any], schema: dict[str, Any]) -> bool:
+    if not _array_contains_keywords_are_valid(schema):
+        return False
+
+    contains_schema = schema["contains"]
+    min_contains = schema.get("minContains", 1)
+    max_contains = schema.get("maxContains")
+
+    matching_items = sum(
+        1
+        for item in value
+        if _value_matches_schema(item, contains_schema, enforce_string_pattern=True)
+    )
+    if matching_items < min_contains:
+        return False
+    if max_contains is not None and matching_items > max_contains:
+        return False
+    return True
+
+
+def _array_contains_keywords_are_valid(schema: dict[str, Any]) -> bool:
+    if not _local_array_contains_keywords_are_valid(schema):
+        return False
+
+    for subschema in _array_contains_validation_subschemas(schema):
+        if not _array_contains_keywords_are_valid(subschema):
+            return False
+
+    return True
+
+
+def _local_array_contains_keywords_are_valid(schema: dict[str, Any]) -> bool:
+    if not _schema_type_includes(schema.get("type"), {"array"}):
+        return True
+    if not any(keyword in schema for keyword in ("contains", "minContains", "maxContains")):
+        return True
+
+    if "contains" in schema and not isinstance(schema["contains"], dict):
+        return False
+    min_contains = schema.get("minContains", 1)
+    if not _contains_count_limit_is_valid(min_contains):
+        return False
+    if "maxContains" not in schema:
+        return True
+    max_contains = schema["maxContains"]
+    return _contains_count_limit_is_valid(max_contains) and min_contains <= max_contains
+
+
+def _array_contains_validation_subschemas(schema: dict[str, Any]) -> list[dict[str, Any]]:
+    subschemas: list[dict[str, Any]] = []
+
+    any_of = schema.get("anyOf")
+    if isinstance(any_of, list):
+        subschemas.extend(subschema for subschema in any_of if isinstance(subschema, dict))
+
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        subschemas.extend(subschema for subschema in properties.values() if isinstance(subschema, dict))
+
+    items = schema.get("items")
+    if isinstance(items, dict):
+        subschemas.append(items)
+
+    additional_properties = schema.get("additionalProperties")
+    if isinstance(additional_properties, dict):
+        subschemas.append(additional_properties)
+
+    dependent_schemas = schema.get("dependentSchemas")
+    if isinstance(dependent_schemas, dict):
+        subschemas.extend(subschema for subschema in dependent_schemas.values() if isinstance(subschema, dict))
+
+    contains = schema.get("contains")
+    if isinstance(contains, dict):
+        subschemas.append(contains)
+
+    return subschemas
+
+
+def _contains_count_limit_is_valid(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def _array_items_are_unique(value: list[Any]) -> bool:
@@ -188,6 +274,8 @@ def _object_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
 
 
 def _value_matches_schema(value: Any, schema: dict[str, Any], *, enforce_string_pattern: bool = False) -> bool:
+    if not _array_contains_keywords_are_valid(schema):
+        return False
     if not _any_of_matches_schema(value, schema, enforce_string_pattern=enforce_string_pattern):
         return False
 

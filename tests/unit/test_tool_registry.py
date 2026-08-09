@@ -2147,6 +2147,399 @@ def test_tool_registry_allows_unique_array_items_when_unique_items_true() -> Non
     ]
 
 
+def test_tool_registry_denies_array_without_item_matching_contains_before_handler_runs() -> None:
+    calls: list[list[str]] = []
+
+    def handler(paths: list[str]) -> dict[str, int]:
+        calls.append(paths)
+        return {"count": len(paths)}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_read",
+            risk="read_only",
+            description="Read multiple files.",
+            parameters={
+                "type": "array",
+                "items": {"type": "string"},
+                "contains": {"const": "README.md"},
+            },
+            handler=handler,
+        )
+    )
+    arguments = ["pyproject.toml", "src/forgecode_agent/tools.py"]
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("batch_read", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "batch_read",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_allows_array_with_item_matching_contains() -> None:
+    calls: list[list[str]] = []
+
+    def handler(paths: list[str]) -> dict[str, int]:
+        calls.append(paths)
+        return {"count": len(paths)}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_read",
+            risk="read_only",
+            description="Read multiple files.",
+            parameters={
+                "type": "array",
+                "items": {"type": "string"},
+                "contains": {"pattern": r"^README\.md$", "type": "string"},
+            },
+            handler=handler,
+        )
+    )
+    arguments = ["pyproject.toml", "README.md"]
+
+    result = registry.execute("batch_read", arguments)
+
+    assert result == {"count": 2}
+    assert calls == [arguments]
+    assert registry.calls == [
+        {"tool": "batch_read", "arguments": arguments, "status": "completed"}
+    ]
+
+
+@pytest.mark.parametrize(
+    ("arguments", "parameters"),
+    [
+        (
+            ["read:one", "skip", "skip"],
+            {
+                "type": "array",
+                "items": {"type": "string"},
+                "contains": {"pattern": r"^read:", "type": "string"},
+                "minContains": 2,
+                "maxContains": 2,
+            },
+        ),
+        (
+            ["read:one", "read:two", "read:three"],
+            {
+                "type": "array",
+                "items": {"type": "string"},
+                "contains": {"pattern": r"^read:", "type": "string"},
+                "minContains": 1,
+                "maxContains": 2,
+            },
+        ),
+    ],
+)
+def test_tool_registry_enforces_array_min_contains_and_max_contains_before_handler_runs(
+    arguments: list[str],
+    parameters: dict[str, object],
+) -> None:
+    calls: list[list[str]] = []
+
+    def handler(paths: list[str]) -> dict[str, int]:
+        calls.append(paths)
+        return {"count": len(paths)}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_read",
+            risk="read_only",
+            description="Read multiple files.",
+            parameters=parameters,
+            handler=handler,
+        )
+    )
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("batch_read", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "batch_read",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        {"type": "array", "contains": "README.md"},
+        {"type": "array", "contains": {"type": "string"}, "minContains": -1},
+        {"type": "array", "contains": {"type": "string"}, "minContains": True},
+        {"type": "array", "contains": {"type": "string"}, "maxContains": None},
+        {"type": "array", "contains": {"type": "string"}, "maxContains": 1.5},
+        {
+            "type": "array",
+            "contains": {"type": "string"},
+            "minContains": 2,
+            "maxContains": 1,
+        },
+    ],
+)
+def test_tool_registry_denies_malformed_array_contains_settings_before_handler_runs(
+    parameters: dict[str, object],
+) -> None:
+    calls: list[list[str]] = []
+
+    def handler(paths: list[str]) -> dict[str, int]:
+        calls.append(paths)
+        return {"count": len(paths)}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_read",
+            risk="read_only",
+            description="Read multiple files.",
+            parameters=parameters,
+            handler=handler,
+        )
+    )
+    arguments = ["README.md"]
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("batch_read", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "batch_read",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        {"type": ["array", "null"], "contains": "README.md"},
+        {"type": ["array", "null"], "contains": {"type": "string"}, "minContains": -1},
+        {"type": ["array", "null"], "contains": {"type": "string"}, "maxContains": None},
+        {
+            "type": ["array", "null"],
+            "contains": {"type": "string"},
+            "minContains": 2,
+            "maxContains": 1,
+        },
+    ],
+)
+def test_tool_registry_denies_malformed_nullable_array_contains_settings_before_handler_runs(
+    parameters: dict[str, object],
+) -> None:
+    calls: list[None] = []
+
+    def handler(paths: None) -> dict[str, bool]:
+        calls.append(paths)
+        return {"received_null": paths is None}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_read",
+            risk="read_only",
+            description="Read multiple files.",
+            parameters=parameters,
+            handler=handler,
+        )
+    )
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("batch_read", None)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "batch_read",
+            "arguments": None,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("parameters", "arguments"),
+    [
+        (
+            {
+                "anyOf": [
+                    {"type": ["array", "null"], "contains": "bad"},
+                    {"type": "null"},
+                ]
+            },
+            None,
+        ),
+        (
+            {
+                "anyOf": [
+                    {"type": "array", "contains": "bad"},
+                    {"type": "array"},
+                ]
+            },
+            [],
+        ),
+    ],
+)
+def test_tool_registry_denies_malformed_array_contains_settings_in_any_of_before_handler_runs(
+    parameters: dict[str, object],
+    arguments: object,
+) -> None:
+    calls: list[object] = []
+
+    def handler(value: object) -> dict[str, bool]:
+        calls.append(value)
+        return {"handled": True}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_read",
+            risk="read_only",
+            description="Read multiple files.",
+            parameters=parameters,
+            handler=handler,
+        )
+    )
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("batch_read", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "batch_read",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_denies_malformed_array_contains_in_unused_optional_property_before_handler_runs() -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="configure_paths",
+            risk="read_only",
+            description="Configure optional paths.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "paths": {"type": "array", "contains": "bad"},
+                },
+            },
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("configure_paths", {})
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "configure_paths",
+            "arguments": {},
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_denies_malformed_array_contains_in_unmatched_any_of_branch_before_handler_runs() -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="configure_paths",
+            risk="read_only",
+            description="Configure paths or mode.",
+            parameters={
+                "anyOf": [
+                    {
+                        "type": "object",
+                        "properties": {
+                            "paths": {"type": "array", "contains": "bad"},
+                        },
+                    },
+                    {
+                        "type": "object",
+                        "properties": {"mode": {"const": "default"}},
+                        "required": ["mode"],
+                    },
+                ]
+            },
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+    arguments = {"mode": "default"}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("configure_paths", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "configure_paths",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_allows_valid_nested_array_contains_schema() -> None:
+    calls: list[dict[str, list[str]]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="configure_paths",
+            risk="read_only",
+            description="Configure paths.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "contains": {"const": "README.md"},
+                    },
+                },
+                "required": ["paths"],
+            },
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+    arguments = {"paths": ["README.md", "pyproject.toml"]}
+
+    result = registry.execute("configure_paths", arguments)
+
+    assert result is None
+    assert calls == [arguments]
+    assert registry.calls == [
+        {"tool": "configure_paths", "arguments": arguments, "status": "completed"}
+    ]
+
+
 def test_tool_registry_executes_array_schema_with_list_as_single_positional_argument() -> None:
     calls: list[list[str]] = []
 
