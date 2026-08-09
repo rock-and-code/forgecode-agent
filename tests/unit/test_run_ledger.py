@@ -65,6 +65,44 @@ def test_read_jsonl_rejects_empty_files(tmp_path) -> None:
         raise AssertionError("Expected ValueError for empty JSONL ledger")
 
 
+def test_read_jsonl_rejects_malformed_json_lines_with_value_error(tmp_path) -> None:
+    output_path = tmp_path / "malformed.jsonl"
+    output_path.write_text(
+        json.dumps({"type": "one", "data": {}, "timestamp": 0, "run_id": "same"})
+        + "\n{not json}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        RunLedger.read_jsonl(output_path)
+
+    message = str(exc_info.value).lower()
+    assert "jsonl" in message
+    assert "malformed" in message
+    assert "row 1" in message
+    assert "line 2" in message
+    assert exc_info.value.__cause__ is None
+
+
+def test_read_jsonl_malformed_line_reports_non_empty_row_and_physical_line(tmp_path) -> None:
+    output_path = tmp_path / "leading-blank-malformed.jsonl"
+    output_path.write_text(
+        "\n"
+        + json.dumps({"type": "one", "data": {}, "timestamp": 0, "run_id": "same"})
+        + "\n{not json}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        RunLedger.read_jsonl(output_path)
+
+    message = str(exc_info.value).lower()
+    assert "jsonl" in message
+    assert "malformed" in message
+    assert "row 1" in message
+    assert "line 3" in message
+
+
 def test_read_jsonl_rejects_mixed_run_ids(tmp_path) -> None:
     output_path = tmp_path / "mixed.jsonl"
     output_path.write_text(

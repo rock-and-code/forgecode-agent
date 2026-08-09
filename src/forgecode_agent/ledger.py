@@ -78,7 +78,15 @@ class RunLedger:
     @classmethod
     def read_jsonl(cls, path: str | Path) -> RunLedger:
         input_path = Path(path)
-        rows = [json.loads(line) for line in input_path.read_text(encoding="utf-8").splitlines() if line]
+        rows = []
+        for line_number, line in enumerate(input_path.read_text(encoding="utf-8").splitlines(), start=1):
+            if not line:
+                continue
+            row_index = len(rows)
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                raise ValueError(f"Malformed JSONL ledger row {row_index} (line {line_number})") from None
         if not rows:
             raise ValueError("Cannot read empty JSONL ledger")
 
