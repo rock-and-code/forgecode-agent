@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from forgecode_agent.ledger import RunLedger
 
 
@@ -104,6 +106,17 @@ def test_read_jsonl_rejects_non_contiguous_timestamps_in_file_order(tmp_path) ->
         assert "timestamp" in message and ("order" in message or "contiguous" in message)
     else:
         raise AssertionError("Expected ValueError for non-contiguous JSONL ledger timestamps")
+
+
+@pytest.mark.parametrize("missing_key", ["type", "data", "timestamp", "run_id"])
+def test_read_jsonl_rejects_rows_missing_required_keys(tmp_path, missing_key: str) -> None:
+    output_path = tmp_path / f"missing-{missing_key}.jsonl"
+    row = {"type": "one", "data": {}, "timestamp": 0, "run_id": "same"}
+    del row[missing_key]
+    output_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="(?i)(missing|required).*key"):
+        RunLedger.read_jsonl(output_path)
 
 
 def test_write_jsonl_redacts_default_secret_keys_recursively_without_mutating_events(tmp_path) -> None:

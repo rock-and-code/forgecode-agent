@@ -82,6 +82,13 @@ class RunLedger:
         if not rows:
             raise ValueError("Cannot read empty JSONL ledger")
 
+        required_keys = {"type", "data", "timestamp", "run_id"}
+        for index, row in enumerate(rows):
+            missing_keys = required_keys - row.keys()
+            if missing_keys:
+                missing = ", ".join(sorted(missing_keys))
+                raise ValueError(f"JSONL ledger row {index} missing required key(s): {missing}")
+
         run_id = rows[0]["run_id"]
         if any(row["run_id"] != run_id for row in rows):
             raise ValueError("Cannot read JSONL ledger with mixed run_id rows")
