@@ -166,6 +166,8 @@ def _value_matches_type(value: Any, expected_type: Any) -> bool:
         return isinstance(value, str)
     if expected_type == "integer":
         return isinstance(value, int) and not isinstance(value, bool)
+    if expected_type == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
     if expected_type == "boolean":
         return isinstance(value, bool)
     if expected_type == "object":
