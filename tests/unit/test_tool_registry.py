@@ -235,6 +235,108 @@ def test_tool_registry_denies_dict_for_array_schema_before_handler_runs() -> Non
     ]
 
 
+def test_tool_registry_denies_array_item_type_mismatch_before_handler_runs() -> None:
+    calls: list[list[object]] = []
+
+    def handler(paths: list[object]) -> dict[str, int]:
+        calls.append(paths)
+        return {"count": len(paths)}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_read",
+            risk="read_only",
+            description="Read multiple files.",
+            parameters={"type": "array", "items": {"type": "string"}},
+            handler=handler,
+        )
+    )
+    arguments = ["README.md", 123]
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("batch_read", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "batch_read",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize("invalid_item", [True, False])
+def test_tool_registry_denies_integer_array_item_bool_before_handler_runs(
+    invalid_item: bool,
+) -> None:
+    calls: list[list[object]] = []
+
+    def handler(counts: list[object]) -> dict[str, int]:
+        calls.append(counts)
+        return {"count": len(counts)}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="sum_counts",
+            risk="read_only",
+            description="Sum integer counts.",
+            parameters={"type": "array", "items": {"type": "integer"}},
+            handler=handler,
+        )
+    )
+    arguments = [1, invalid_item]
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("sum_counts", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "sum_counts",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_denies_boolean_array_item_type_mismatch_before_handler_runs() -> None:
+    calls: list[list[object]] = []
+
+    def handler(flags: list[object]) -> dict[str, int]:
+        calls.append(flags)
+        return {"count": len(flags)}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="set_flags",
+            risk="read_only",
+            description="Set boolean flags.",
+            parameters={"type": "array", "items": {"type": "boolean"}},
+            handler=handler,
+        )
+    )
+    arguments = [True, "false"]
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("set_flags", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "set_flags",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
 def test_tool_registry_executes_array_schema_with_list_as_single_positional_argument() -> None:
     calls: list[list[str]] = []
 
