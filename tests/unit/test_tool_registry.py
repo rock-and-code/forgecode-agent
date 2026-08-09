@@ -107,6 +107,70 @@ def test_tool_registry_denies_argument_type_mismatch_before_handler_runs(
     ]
 
 
+def test_tool_registry_denies_integer_argument_type_mismatch_before_handler_runs() -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="repeat",
+            risk="read_only",
+            description="Repeat a message a number of times.",
+            parameters={
+                "type": "object",
+                "properties": {"count": {"type": "integer"}},
+                "required": ["count"],
+            },
+            handler=lambda count: calls.append({"count": count}),
+        )
+    )
+    arguments = {"count": True}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("repeat", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "repeat",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_denies_boolean_argument_type_mismatch_before_handler_runs() -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="set_enabled",
+            risk="read_only",
+            description="Set enabled state.",
+            parameters={
+                "type": "object",
+                "properties": {"enabled": {"type": "boolean"}},
+                "required": ["enabled"],
+            },
+            handler=lambda enabled: calls.append({"enabled": enabled}),
+        )
+    )
+    arguments = {"enabled": "true"}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("set_enabled", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "set_enabled",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
 @pytest.mark.parametrize("arguments", [None, ["README.md"], "README.md"])
 def test_tool_registry_denies_non_dict_arguments_before_handler_runs(
     read_file_tool: ToolDefinition,

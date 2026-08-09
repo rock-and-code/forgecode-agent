@@ -88,5 +88,9 @@ def _arguments_match_schema(schema: dict[str, Any], arguments: Any) -> bool:
         expected_type = properties.get(name, {}).get("type")
         if expected_type == "string" and not isinstance(value, str):
             return False
+        if expected_type == "integer" and (not isinstance(value, int) or isinstance(value, bool)):
+            return False
+        if expected_type == "boolean" and not isinstance(value, bool):
+            return False
 
     return True
