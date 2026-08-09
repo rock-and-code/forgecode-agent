@@ -148,6 +148,317 @@ def test_tool_registry_allows_top_level_dependent_required_when_dependency_prese
     ]
 
 
+def test_tool_registry_denies_top_level_dependent_schemas_violation_before_handler_runs() -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="configure_auth",
+            risk="read_only",
+            description="Configure authentication.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string"},
+                    "token": {"type": "string"},
+                },
+                "dependentSchemas": {
+                    "token": {
+                        "properties": {"mode": {"const": "bearer"}},
+                        "required": ["mode"],
+                        "additionalProperties": True,
+                    }
+                },
+            },
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+    arguments = {"token": "abc", "mode": "basic"}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("configure_auth", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "configure_auth",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_allows_top_level_dependent_schemas_when_subschema_matches() -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="configure_auth",
+            risk="read_only",
+            description="Configure authentication.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string"},
+                    "token": {"type": "string"},
+                },
+                "dependentSchemas": {
+                    "token": {
+                        "properties": {"mode": {"const": "bearer"}},
+                        "required": ["mode"],
+                        "additionalProperties": True,
+                    }
+                },
+            },
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+    arguments = {"token": "abc", "mode": "bearer"}
+
+    result = registry.execute("configure_auth", arguments)
+
+    assert result is None
+    assert calls == [arguments]
+    assert registry.calls == [
+        {"tool": "configure_auth", "arguments": arguments, "status": "completed"}
+    ]
+
+
+def test_tool_registry_denies_dependent_schemas_any_of_object_subschema_without_explicit_type_before_handler_runs() -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="configure_flag",
+            risk="read_only",
+            description="Configure a feature flag.",
+            parameters={
+                "type": "object",
+                "dependentSchemas": {
+                    "x": {
+                        "anyOf": [
+                            {
+                                "required": ["y"],
+                                "properties": {"y": {"const": 1}},
+                                "additionalProperties": True,
+                            }
+                        ]
+                    }
+                },
+            },
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+    arguments = {"x": 1, "y": 2}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("configure_flag", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "configure_flag",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_denies_top_level_no_type_dependent_schemas_enum_mismatch_before_handler_runs() -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="configure_flag",
+            risk="read_only",
+            description="Configure a feature flag.",
+            parameters={"dependentSchemas": {"a": {}}, "enum": [{"a": 1}]},
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+    arguments = {"a": 2}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("configure_flag", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "configure_flag",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "dependent_schema",
+    [
+        {
+            "properties": {"a": {}},
+            "additionalProperties": True,
+            "enum": [{"a": 1}],
+        },
+        {
+            "properties": {"a": {}},
+            "additionalProperties": True,
+            "const": {"a": 1},
+        },
+    ],
+)
+def test_tool_registry_denies_dependent_schemas_no_type_object_keywords_when_general_constraints_fail(
+    dependent_schema: dict[str, object],
+) -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="configure_flag",
+            risk="read_only",
+            description="Configure a feature flag.",
+            parameters={"type": "object", "dependentSchemas": {"a": dependent_schema}},
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+    arguments = {"a": 2}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("configure_flag", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "configure_flag",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "dependent_schema",
+    [
+        {"type": "object"},
+        {"anyOf": [{"type": "object"}]},
+    ],
+)
+def test_tool_registry_evaluates_dependent_schemas_against_whole_object(
+    dependent_schema: dict[str, object],
+) -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="configure_flag",
+            risk="read_only",
+            description="Configure a feature flag.",
+            parameters={
+                "type": "object",
+                "dependentSchemas": {"x": dependent_schema},
+            },
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+    arguments = {"x": 1}
+
+    result = registry.execute("configure_flag", arguments)
+
+    assert result is None
+    assert calls == [arguments]
+    assert registry.calls == [
+        {"tool": "configure_flag", "arguments": arguments, "status": "completed"}
+    ]
+
+
+def test_tool_registry_denies_nested_dependent_schemas_violation_before_handler_runs() -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="configure_service",
+            risk="read_only",
+            description="Configure service auth.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "auth": {
+                        "type": "object",
+                        "properties": {
+                            "mode": {"type": "string"},
+                            "token": {"type": "string"},
+                        },
+                        "dependentSchemas": {
+                            "token": {
+                                "properties": {"mode": {"const": "bearer"}},
+                                "required": ["mode"],
+                                "additionalProperties": True,
+                            }
+                        },
+                    }
+                },
+                "required": ["auth"],
+            },
+            handler=lambda auth: calls.append({"auth": auth}),
+        )
+    )
+    arguments = {"auth": {"token": "abc", "mode": "basic"}}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("configure_service", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "configure_service",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "dependent_schemas",
+    [
+        ["not", "a", "dict"],
+        {1: {"required": ["mode"]}},
+        {"token": "not-a-schema"},
+    ],
+)
+def test_tool_registry_denies_malformed_dependent_schemas_before_handler_runs(
+    dependent_schemas: object,
+) -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="configure_auth",
+            risk="read_only",
+            description="Configure authentication.",
+            parameters={"type": "object", "dependentSchemas": dependent_schemas},
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+    arguments = {"token": "abc"}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("configure_auth", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "configure_auth",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
 def test_tool_registry_dependency_only_dependent_required_allows_valid_objects_and_denies_missing_dependency() -> None:
     calls: list[dict[str, str]] = []
     registry = ToolRegistry()

@@ -104,7 +104,13 @@ def _arguments_match_schema(schema: dict[str, Any], arguments: Any) -> bool:
         return False
     expected_type = schema.get("type")
     if expected_type is None:
-        return _object_matches_schema(arguments, schema)
+        if not _object_matches_schema(arguments, schema):
+            return False
+        return _value_matches_schema(
+            arguments,
+            schema,
+            enforce_string_pattern=True,
+        )
     if _schema_type_includes(expected_type, {"array"}) and isinstance(arguments, list):
         return _array_matches_schema(arguments, schema)
     if _schema_type_includes(expected_type, {"object"}) and isinstance(arguments, dict):
@@ -118,6 +124,10 @@ def _arguments_match_schema(schema: dict[str, Any], arguments: Any) -> bool:
 
 def _root_arguments_should_be_passed_as_single_value(schema: dict[str, Any], arguments: Any) -> bool:
     return schema.get("type") == "array" or not isinstance(arguments, dict)
+
+
+def _dependent_schema_matches_value(schema: dict[str, Any], value: Any) -> bool:
+    return _value_matches_schema(value, schema, enforce_string_pattern=True)
 
 
 def _array_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
@@ -152,11 +162,13 @@ def _object_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
 
     if not _dependent_required_matches(value, schema):
         return False
+    if not _dependent_schemas_match(value, schema):
+        return False
 
     properties = schema.get("properties", {})
     additional_properties = schema.get(
         "additionalProperties",
-        "dependentRequired" in schema and "properties" not in schema,
+        ("dependentRequired" in schema or "dependentSchemas" in schema) and "properties" not in schema,
     )
 
     for name, item in value.items():
@@ -183,14 +195,20 @@ def _value_matches_schema(value: Any, schema: dict[str, Any], *, enforce_string_
         return False
 
     expected_type = schema.get("type")
+    if expected_type is None and _has_object_validation_keywords(schema):
+        if isinstance(value, dict) and not _object_matches_schema(value, schema):
+            return False
     if _schema_type_includes(expected_type, {"array"}) and isinstance(value, list):
-        return _array_matches_schema(value, schema)
+        if not _array_matches_schema(value, schema):
+            return False
     if _schema_type_includes(expected_type, {"object"}) and isinstance(value, dict):
         if _is_bare_object_schema(schema):
-            return True
-        if _is_bare_object_property_count_schema(schema):
-            return _object_property_count_matches(value, schema)
-        return _object_matches_schema(value, schema)
+            pass
+        elif _is_bare_object_property_count_schema(schema):
+            if not _object_property_count_matches(value, schema):
+                return False
+        elif not _object_matches_schema(value, schema):
+            return False
 
     if not _value_matches_type(value, expected_type):
         return False
@@ -199,6 +217,7 @@ def _value_matches_schema(value: Any, schema: dict[str, Any], *, enforce_string_
     if (
         _schema_type_includes(expected_type, {"integer", "number"})
         and _value_matches_type(value, "number")
+        and isinstance(value, (int, float))
         and "minimum" in schema
         and value < schema["minimum"]
     ):
@@ -206,6 +225,7 @@ def _value_matches_schema(value: Any, schema: dict[str, Any], *, enforce_string_
     if (
         _schema_type_includes(expected_type, {"integer", "number"})
         and _value_matches_type(value, "number")
+        and isinstance(value, (int, float))
         and "maximum" in schema
         and value > schema["maximum"]
     ):
@@ -213,6 +233,7 @@ def _value_matches_schema(value: Any, schema: dict[str, Any], *, enforce_string_
     if (
         _schema_type_includes(expected_type, {"integer", "number"})
         and _value_matches_type(value, "number")
+        and isinstance(value, (int, float))
         and "multipleOf" in schema
         and not _value_is_multiple_of(value, schema["multipleOf"])
     ):
@@ -220,6 +241,7 @@ def _value_matches_schema(value: Any, schema: dict[str, Any], *, enforce_string_
     if (
         _schema_type_includes(expected_type, {"string"})
         and _value_matches_type(value, "string")
+        and isinstance(value, str)
         and "minLength" in schema
         and len(value) < schema["minLength"]
     ):
@@ -227,6 +249,7 @@ def _value_matches_schema(value: Any, schema: dict[str, Any], *, enforce_string_
     if (
         _schema_type_includes(expected_type, {"string"})
         and _value_matches_type(value, "string")
+        and isinstance(value, str)
         and "maxLength" in schema
         and len(value) > schema["maxLength"]
     ):
@@ -235,6 +258,7 @@ def _value_matches_schema(value: Any, schema: dict[str, Any], *, enforce_string_
         enforce_string_pattern
         and _schema_type_includes(expected_type, {"string"})
         and _value_matches_type(value, "string")
+        and isinstance(value, str)
         and "pattern" in schema
         and re.search(schema["pattern"], value) is None
     ):
@@ -278,6 +302,7 @@ def _is_bare_object_schema(schema: dict[str, Any]) -> bool:
         and "properties" not in schema
         and "required" not in schema
         and "dependentRequired" not in schema
+        and "dependentSchemas" not in schema
         and "additionalProperties" not in schema
         and "minProperties" not in schema
         and "maxProperties" not in schema
@@ -290,8 +315,24 @@ def _is_bare_object_property_count_schema(schema: dict[str, Any]) -> bool:
         and "properties" not in schema
         and "required" not in schema
         and "dependentRequired" not in schema
+        and "dependentSchemas" not in schema
         and "additionalProperties" not in schema
         and ("minProperties" in schema or "maxProperties" in schema)
+    )
+
+
+def _has_object_validation_keywords(schema: dict[str, Any]) -> bool:
+    return any(
+        keyword in schema
+        for keyword in (
+            "properties",
+            "required",
+            "dependentRequired",
+            "dependentSchemas",
+            "additionalProperties",
+            "minProperties",
+            "maxProperties",
+        )
     )
 
 
@@ -314,6 +355,20 @@ def _dependent_required_matches(value: dict[str, Any], schema: dict[str, Any]) -
         if not all(isinstance(required_name, str) for required_name in required_names):
             return False
         if property_name in value and any(required_name not in value for required_name in required_names):
+            return False
+
+    return True
+
+
+def _dependent_schemas_match(value: dict[str, Any], schema: dict[str, Any]) -> bool:
+    dependent_schemas = schema.get("dependentSchemas", {})
+    if not isinstance(dependent_schemas, dict):
+        return False
+
+    for property_name, dependent_schema in dependent_schemas.items():
+        if not isinstance(property_name, str) or not isinstance(dependent_schema, dict):
+            return False
+        if property_name in value and not _dependent_schema_matches_value(dependent_schema, value):
             return False
 
     return True
