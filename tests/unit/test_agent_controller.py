@@ -367,6 +367,7 @@ def test_agent_controller_stops_safely_for_unknown_tools(
         "model_responded",
         "tool_call_requested",
         "policy_decision",
+        "tool_call_failed",
         "run_completed",
     ]
     assert ledger.events[4].data == {
@@ -374,11 +375,54 @@ def test_agent_controller_stops_safely_for_unknown_tools(
         "allowed": False,
         "reason": "unknown_tool",
     }
+    assert ledger.events[5].data == {"tool": "missing_tool", "reason": "unknown_tool"}
     assert ledger.events[-1].data == {
         "final_answer": "I need a missing tool.",
         "completed": False,
         "stop_reason": "unknown_tool",
     }
+
+
+def test_agent_controller_redacts_unknown_tool_arguments_from_serialized_ledger(
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+    tmp_path: Path,
+) -> None:
+    secret_payload = "UNKNOWN_TOOL_PAYLOAD_DO_NOT_LOG_8f2d58b694"
+    ledger = RunLedger(run_id="unknown-tool-redacted-arguments")
+    provider = FakeModelProvider(
+        script=[
+            AssistantMessage(
+                content="I need a missing tool.",
+                tool_intents=[
+                    ToolIntent(
+                        name="missing_tool",
+                        arguments={"payload": secret_payload, "nested": {"copy": secret_payload}},
+                    )
+                ],
+            ),
+            AssistantMessage(content="This response must not be requested."),
+        ]
+    )
+    registry = read_only_registry.clone_empty_history()
+    controller = AgentController(
+        model_provider=provider,
+        tools=registry,
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+        max_iterations=1,
+    )
+
+    result = controller.run(goal="Use a missing tool with secret arguments")
+    ledger_path = tmp_path / "ledger.jsonl"
+    ledger.write_jsonl(ledger_path)
+    serialized_ledger = ledger_path.read_text(encoding="utf-8")
+
+    assert result.stop_reason == "unknown_tool"
+    assert registry.calls == []
+    assert len(provider.requests) == 1
+    assert ledger.events[5].data == {"tool": "missing_tool", "reason": "unknown_tool"}
+    assert secret_payload not in serialized_ledger
 
 
 def test_agent_controller_stops_safely_for_unknown_tools_with_non_dict_arguments(
@@ -418,6 +462,7 @@ def test_agent_controller_stops_safely_for_unknown_tools_with_non_dict_arguments
         "model_responded",
         "tool_call_requested",
         "policy_decision",
+        "tool_call_failed",
         "run_completed",
     ]
     assert ledger.events[4].data == {
@@ -425,6 +470,7 @@ def test_agent_controller_stops_safely_for_unknown_tools_with_non_dict_arguments
         "allowed": False,
         "reason": "unknown_tool",
     }
+    assert ledger.events[5].data == {"tool": "missing_tool", "reason": "unknown_tool"}
     assert ledger.events[-1].data == {
         "final_answer": "I need a missing tool with malformed arguments.",
         "completed": False,

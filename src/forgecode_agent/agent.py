@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from forgecode_agent.ledger import RunLedger
+from forgecode_agent.ledger import REDACTED_VALUE, RunLedger
 from forgecode_agent.models import AssistantMessage
 from forgecode_agent.policy import ApprovalPolicy
 from forgecode_agent.tools import ToolCallDenied, ToolExecutionError, ToolRegistry
@@ -69,13 +69,17 @@ class AgentController:
 
             intent = response.tool_intents[0]
             iterations += 1
-            self.ledger.append("tool_call_requested", {"tool": intent.name, "arguments": intent.arguments})
+            self.ledger.append("tool_call_requested", self._tool_call_requested_data(intent.name, intent.arguments))
 
             tool = self.tools.get(intent.name)
             if tool is None:
                 self.ledger.append(
                     "policy_decision",
                     {"tool": intent.name, "allowed": False, "reason": "unknown_tool"},
+                )
+                self.ledger.append(
+                    "tool_call_failed",
+                    {"tool": intent.name, "reason": "unknown_tool"},
                 )
                 return self._unknown_tool_result(response, iterations)
 
@@ -189,11 +193,19 @@ class AgentController:
             stop_reason="tool_error",
         )
 
-    @staticmethod
-    def _message_data(message: AssistantMessage) -> dict[str, Any]:
+    def _message_data(self, message: AssistantMessage) -> dict[str, Any]:
         return {
             "content": message.content,
             "tool_intents": [
-                {"name": intent.name, "arguments": intent.arguments} for intent in message.tool_intents
+                {
+                    "name": intent.name,
+                    "arguments": REDACTED_VALUE if self.tools.get(intent.name) is None else intent.arguments,
+                }
+                for intent in message.tool_intents
             ],
         }
+
+    def _tool_call_requested_data(self, tool_name: str, arguments: Any) -> dict[str, Any]:
+        if self.tools.get(tool_name) is None:
+            return {"tool": tool_name, "arguments": REDACTED_VALUE}
+        return {"tool": tool_name, "arguments": arguments}
