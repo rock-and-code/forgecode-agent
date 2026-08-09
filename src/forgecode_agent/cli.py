@@ -47,7 +47,10 @@ def workspace_status(workspace: Path) -> WorkspaceStatus:
     model_provider: str | None = None
     config_file_ok = config_file.is_file()
     if config_file_ok:
-        config = _read_simple_toml_strings(config_file)
+        try:
+            config = _read_simple_toml_strings(config_file)
+        except (OSError, UnicodeDecodeError):
+            config = {}
         model_provider = config.get("model_provider")
 
     active_task: str | None = None
