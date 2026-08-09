@@ -90,6 +90,14 @@ class RunLedger:
             if missing_keys:
                 missing = ", ".join(sorted(missing_keys))
                 raise ValueError(f"JSONL ledger row {index} missing required key(s): {missing}")
+            if not isinstance(row["type"], str):
+                raise ValueError(f"JSONL ledger row {index} field 'type' must be a string")
+            if not isinstance(row["data"], dict):
+                raise ValueError(f"JSONL ledger row {index} field 'data' must be an object")
+            if not isinstance(row["timestamp"], int) or isinstance(row["timestamp"], bool):
+                raise ValueError(f"JSONL ledger row {index} field 'timestamp' must be an int")
+            if not isinstance(row["run_id"], str):
+                raise ValueError(f"JSONL ledger row {index} field 'run_id' must be a string")
 
         run_id = rows[0]["run_id"]
         if any(row["run_id"] != run_id for row in rows):

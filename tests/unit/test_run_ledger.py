@@ -128,6 +128,33 @@ def test_read_jsonl_rejects_non_object_rows(tmp_path, row: object) -> None:
         RunLedger.read_jsonl(output_path)
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "expected_type"),
+    [
+        ("type", 123, "string"),
+        ("data", [], "object"),
+        ("timestamp", "0", "int"),
+        ("timestamp", True, "int"),
+        ("run_id", 123, "string"),
+    ],
+)
+def test_read_jsonl_rejects_malformed_required_field_types(
+    tmp_path, field: str, value: object, expected_type: str
+) -> None:
+    output_path = tmp_path / f"malformed-{field}.jsonl"
+    row = {"type": "one", "data": {}, "timestamp": 0, "run_id": "same"}
+    row[field] = value
+    output_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError) as exc_info:
+        RunLedger.read_jsonl(output_path)
+
+    message = str(exc_info.value).lower()
+    assert "row 0" in message
+    assert field in message
+    assert expected_type in message
+
+
 def test_write_jsonl_redacts_default_secret_keys_recursively_without_mutating_events(tmp_path) -> None:
     ledger = RunLedger(run_id="redaction-test")
     sensitive_payload = {
