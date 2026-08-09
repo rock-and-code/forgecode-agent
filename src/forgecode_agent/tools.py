@@ -131,12 +131,22 @@ def _object_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
             return False
 
     properties = schema.get("properties", {})
-    if schema.get("additionalProperties") is not True:
-        for name in value:
-            if name not in properties:
-                return False
+    additional_properties = schema.get("additionalProperties", False)
 
-    return all(_value_matches_schema(item, properties.get(name, {}), enforce_string_pattern=True) for name, item in value.items())
+    for name, item in value.items():
+        if name in properties:
+            property_schema = properties[name]
+        elif additional_properties is True:
+            property_schema = {}
+        elif isinstance(additional_properties, dict):
+            property_schema = additional_properties
+        else:
+            return False
+
+        if not _value_matches_schema(item, property_schema, enforce_string_pattern=True):
+            return False
+
+    return True
 
 
 def _value_matches_schema(value: Any, schema: dict[str, Any], *, enforce_string_pattern: bool = False) -> bool:

@@ -926,6 +926,74 @@ def test_tool_registry_denies_unknown_extra_arguments_before_handler_runs(
     ]
 
 
+def test_tool_registry_allows_additional_properties_matching_schema_dict() -> None:
+    calls: list[dict[str, object]] = []
+
+    def handler(name: str, **metadata: object) -> dict[str, object]:
+        calls.append({"name": name, **metadata})
+        return {"received": {"name": name, **metadata}}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="tag",
+            risk="read_only",
+            description="Tag with string metadata.",
+            parameters={
+                "type": "object",
+                "required": ["name"],
+                "properties": {"name": {"type": "string"}},
+                "additionalProperties": {"type": "string"},
+            },
+            handler=handler,
+        )
+    )
+    arguments = {"name": "fixture", "source": "unit-test"}
+
+    result = registry.execute("tag", arguments)
+
+    assert result == {"received": arguments}
+    assert calls == [arguments]
+    assert registry.calls == [{"tool": "tag", "arguments": arguments, "status": "completed"}]
+
+
+def test_tool_registry_denies_additional_properties_not_matching_schema_dict_before_handler_runs() -> None:
+    calls: list[dict[str, object]] = []
+
+    def handler(name: str, **metadata: object) -> None:
+        calls.append({"name": name, **metadata})
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="tag",
+            risk="read_only",
+            description="Tag with string metadata.",
+            parameters={
+                "type": "object",
+                "required": ["name"],
+                "properties": {"name": {"type": "string"}},
+                "additionalProperties": {"type": "string"},
+            },
+            handler=handler,
+        )
+    )
+    arguments = {"name": "fixture", "retries": 3}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("tag", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "tag",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
 def test_tool_registry_denies_unknown_arguments_for_object_schema_before_handler_runs() -> None:
     calls: list[dict[str, str]] = []
     registry = ToolRegistry()
