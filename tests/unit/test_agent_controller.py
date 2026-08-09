@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import pytest
-
 from forgecode_agent.agent import AgentController
 from forgecode_agent.ledger import RunLedger
 from forgecode_agent.models import AssistantMessage, FakeModelProvider, ToolIntent
 from forgecode_agent.policy import ApprovalPolicy
-from forgecode_agent.tools import ToolCallDenied, ToolDefinition, ToolRegistry
+from forgecode_agent.tools import ToolDefinition, ToolRegistry
 
 
 def test_agent_controller_runs_one_iteration_records_events_and_returns_final_answer(
@@ -160,7 +158,7 @@ def test_agent_controller_stops_without_tool_execution_when_model_returns_multip
     }
 
 
-def test_agent_controller_preserves_policy_denial_flow_for_unknown_tools(
+def test_agent_controller_stops_safely_for_unknown_tools(
     read_only_registry: ToolRegistry,
     auto_read_policy: ApprovalPolicy,
 ) -> None:
@@ -183,27 +181,35 @@ def test_agent_controller_preserves_policy_denial_flow_for_unknown_tools(
         max_iterations=1,
     )
 
-    with pytest.raises(ToolCallDenied, match="approval_required") as exc_info:
-        controller.run(goal="Use a missing tool")
+    result = controller.run(goal="Use a missing tool")
 
-    assert exc_info.value.reason == "approval_required"
+    assert result.final_answer == "I need a missing tool."
+    assert result.completed is False
+    assert result.iterations == 1
+    assert result.stop_reason == "unknown_tool"
     assert registry.calls == []
+    assert len(provider.requests) == 1
     assert [event.type for event in ledger.events] == [
         "run_started",
         "model_requested",
         "model_responded",
         "tool_call_requested",
         "policy_decision",
+        "run_completed",
     ]
-    assert ledger.events[-1].data == {
+    assert ledger.events[4].data == {
         "tool": "missing_tool",
         "allowed": False,
-        "reason": "approval_required",
+        "reason": "unknown_tool",
     }
-    assert "run_completed" not in [event.type for event in ledger.events]
+    assert ledger.events[-1].data == {
+        "final_answer": "I need a missing tool.",
+        "completed": False,
+        "stop_reason": "unknown_tool",
+    }
 
 
-def test_agent_controller_preserves_policy_denial_flow_for_unknown_tools_with_non_dict_arguments(
+def test_agent_controller_stops_safely_for_unknown_tools_with_non_dict_arguments(
     read_only_registry: ToolRegistry,
     auto_read_policy: ApprovalPolicy,
 ) -> None:
@@ -226,24 +232,32 @@ def test_agent_controller_preserves_policy_denial_flow_for_unknown_tools_with_no
         max_iterations=1,
     )
 
-    with pytest.raises(ToolCallDenied, match="approval_required") as exc_info:
-        controller.run(goal="Use a missing tool with malformed arguments")
+    result = controller.run(goal="Use a missing tool with malformed arguments")
 
-    assert exc_info.value.reason == "approval_required"
+    assert result.final_answer == "I need a missing tool with malformed arguments."
+    assert result.completed is False
+    assert result.iterations == 1
+    assert result.stop_reason == "unknown_tool"
     assert registry.calls == []
+    assert len(provider.requests) == 1
     assert [event.type for event in ledger.events] == [
         "run_started",
         "model_requested",
         "model_responded",
         "tool_call_requested",
         "policy_decision",
+        "run_completed",
     ]
-    assert ledger.events[-1].data == {
+    assert ledger.events[4].data == {
         "tool": "missing_tool",
         "allowed": False,
-        "reason": "approval_required",
+        "reason": "unknown_tool",
     }
-    assert "run_completed" not in [event.type for event in ledger.events]
+    assert ledger.events[-1].data == {
+        "final_answer": "I need a missing tool with malformed arguments.",
+        "completed": False,
+        "stop_reason": "unknown_tool",
+    }
 
 
 def test_agent_controller_stops_safely_when_non_read_only_tool_arguments_are_not_a_dict(

@@ -64,6 +64,13 @@ class AgentController:
             self.ledger.append("tool_call_requested", {"tool": intent.name, "arguments": intent.arguments})
 
             tool = self.tools.get(intent.name)
+            if tool is None:
+                self.ledger.append(
+                    "policy_decision",
+                    {"tool": intent.name, "allowed": False, "reason": "unknown_tool"},
+                )
+                return self._unknown_tool_result(first, iterations)
+
             if tool is not None:
                 try:
                     self.tools.validate_arguments(intent.name, intent.arguments)
@@ -76,7 +83,7 @@ class AgentController:
                     )
                     return self._invalid_tool_arguments_result(first, iterations)
 
-            risk = tool.risk if tool is not None else "unknown"
+            risk = tool.risk
             decision = self.approval_policy.decide(tool_name=intent.name, risk=risk, arguments=intent.arguments)
             self.ledger.append(
                 "policy_decision",
@@ -106,6 +113,18 @@ class AgentController:
 
         self.ledger.append("run_completed", {"final_answer": first.content, "completed": True})
         return AgentRunResult(final_answer=first.content, completed=True, iterations=iterations)
+
+    def _unknown_tool_result(self, message: AssistantMessage, iterations: int) -> AgentRunResult:
+        self.ledger.append(
+            "run_completed",
+            {"final_answer": message.content, "completed": False, "stop_reason": "unknown_tool"},
+        )
+        return AgentRunResult(
+            final_answer=message.content,
+            completed=False,
+            iterations=iterations,
+            stop_reason="unknown_tool",
+        )
 
     def _invalid_tool_arguments_result(self, message: AssistantMessage, iterations: int) -> AgentRunResult:
         self.ledger.append(
