@@ -144,6 +144,70 @@ def test_tool_registry_denies_integer_argument_type_mismatch_before_handler_runs
     ]
 
 
+@pytest.mark.parametrize("arguments", [{"count": 0}, {"count": 6}])
+def test_tool_registry_denies_integer_argument_bounds_before_handler_runs(
+    arguments: dict[str, int],
+) -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="repeat",
+            risk="read_only",
+            description="Repeat a message a number of times.",
+            parameters={
+                "type": "object",
+                "properties": {"count": {"type": "integer", "minimum": 1, "maximum": 5}},
+                "required": ["count"],
+            },
+            handler=lambda count: calls.append({"count": count}),
+        )
+    )
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("repeat", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "repeat",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize("count", [1, 3, 5])
+def test_tool_registry_allows_integer_argument_bounds(
+    count: int,
+) -> None:
+    calls: list[dict[str, int]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="repeat",
+            risk="read_only",
+            description="Repeat a message a number of times.",
+            parameters={
+                "type": "object",
+                "properties": {"count": {"type": "integer", "minimum": 1, "maximum": 5}},
+                "required": ["count"],
+            },
+            handler=lambda count: calls.append({"count": count}),
+        )
+    )
+    arguments = {"count": count}
+
+    result = registry.execute("repeat", arguments)
+
+    assert result is None
+    assert calls == [{"count": count}]
+    assert registry.calls == [
+        {"tool": "repeat", "arguments": arguments, "status": "completed"}
+    ]
+
+
 def test_tool_registry_denies_boolean_argument_type_mismatch_before_handler_runs() -> None:
     calls: list[dict[str, object]] = []
     registry = ToolRegistry()

@@ -140,6 +140,10 @@ def _value_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
         return False
     if "enum" in schema and value not in schema["enum"]:
         return False
+    if expected_type == "integer" and "minimum" in schema and value < schema["minimum"]:
+        return False
+    if expected_type == "integer" and "maximum" in schema and value > schema["maximum"]:
+        return False
     if expected_type == "string" and "minLength" in schema and len(value) < schema["minLength"]:
         return False
     if expected_type == "string" and "maxLength" in schema and len(value) > schema["maxLength"]:
