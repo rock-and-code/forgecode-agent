@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,9 +21,10 @@ DEFAULT_REDACT_KEYS = {
     "token",
 }
 REDACTED_VALUE = "[REDACTED]"
+_SECRET_KEY_VALUE_PATTERN = re.compile(r"(?:^|[?&\s])(?:--)?([A-Za-z_][A-Za-z0-9_-]*?)=([^\s&]+)")
 
 
-def _looks_like_secret_string(value: str) -> bool:
+def _looks_like_secret_string(value: str, key_fragments: Iterable[str]) -> bool:
     bearer_prefix = "Bearer "
     if value.lower().startswith(bearer_prefix.lower()):
         candidate = value[len(bearer_prefix) : len(bearer_prefix) + 6]
@@ -32,6 +34,16 @@ def _looks_like_secret_string(value: str) -> bool:
     if value.startswith(sk_prefix):
         candidate = value[len(sk_prefix) : len(sk_prefix) + 6]
         return len(candidate) == 6 and all(not char.isspace() for char in candidate)
+
+    for match in _SECRET_KEY_VALUE_PATTERN.finditer(value):
+        key = match.group(1).lower()
+        normalized_key = key.replace("-", "_")
+        candidate = match.group(2)[:6]
+        has_secret_key = any(
+            fragment in key or fragment.replace("-", "_") in normalized_key for fragment in key_fragments
+        )
+        if has_secret_key and len(candidate) == 6 and all(not char.isspace() for char in candidate):
+            return True
     return False
 
 
@@ -46,7 +58,7 @@ def _redact(value: Any, redact_keys: Iterable[str]) -> Any:
         return [_redact(item, key_fragments) for item in value]
     if isinstance(value, tuple):
         return tuple(_redact(item, key_fragments) for item in value)
-    if isinstance(value, str) and _looks_like_secret_string(value):
+    if isinstance(value, str) and _looks_like_secret_string(value, key_fragments):
         return REDACTED_VALUE
     return value
 

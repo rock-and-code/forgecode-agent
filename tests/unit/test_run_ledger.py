@@ -265,6 +265,168 @@ def test_write_jsonl_redacts_secret_looking_string_values_without_mutating_event
     assert ledger.events[0].data == payload
 
 
+def test_write_jsonl_redacts_secret_key_value_strings_without_mutating_events(tmp_path) -> None:
+    ledger = RunLedger(run_id="key-value-redaction-test")
+    payload = {
+        "callback_url": "https://example.invalid/callback?token=abcdef&safe=visible",
+        "command": "curl https://example.invalid --data api_key=abcdef",
+        "password_assignment": "password=abcdef",
+        "nested": [
+            "token=abcde",
+            "note=visible",
+            {"message": "prefix password=abcdef suffix"},
+        ],
+    }
+    ledger.append("tool_call_requested", payload)
+
+    ledger.write_jsonl(tmp_path / "run.jsonl")
+
+    row = json.loads((tmp_path / "run.jsonl").read_text(encoding="utf-8"))
+    assert row["data"] == {
+        "callback_url": "[REDACTED]",
+        "command": "[REDACTED]",
+        "password_assignment": "[REDACTED]",
+        "nested": [
+            "token=abcde",
+            "note=visible",
+            {"message": "[REDACTED]"},
+        ],
+    }
+    assert ledger.events[0].data == payload
+
+
+def test_write_jsonl_redacts_compound_secret_key_value_strings_without_mutating_events(tmp_path) -> None:
+    ledger = RunLedger(run_id="compound-key-value-redaction-test")
+    payload = {
+        "callback_url": "https://example.invalid/callback?auth_token=abcdef&safe=visible",
+        "command": "curl https://example.invalid --data db_password=abcdef",
+        "credential_assignment": "service_credential=abcdef",
+        "nested": [
+            "private_key_path=abcdef",
+            "safe_tokenized_label=abcdef",
+            "auth_token=abcde",
+        ],
+    }
+    ledger.append("tool_call_requested", payload)
+
+    ledger.write_jsonl(tmp_path / "run.jsonl")
+
+    row = json.loads((tmp_path / "run.jsonl").read_text(encoding="utf-8"))
+    assert row["data"] == {
+        "callback_url": "[REDACTED]",
+        "command": "[REDACTED]",
+        "credential_assignment": "[REDACTED]",
+        "nested": [
+            "[REDACTED]",
+            "[REDACTED]",
+            "auth_token=abcde",
+        ],
+    }
+    assert ledger.events[0].data == payload
+
+
+def test_write_jsonl_redacts_hyphenated_secret_key_value_strings_without_mutating_events(tmp_path) -> None:
+    ledger = RunLedger(run_id="hyphenated-key-value-redaction-test")
+    payload = {
+        "callback_url": "https://example.invalid/callback?auth-token=abcdef&safe=visible",
+        "command": "curl https://example.invalid --data access-token=abcdef",
+        "nested": [
+            "token-name=abcdef",
+            "api-key=abcdef",
+            "access-key=abcdef",
+            "private-key=abcdef",
+            "auth-token=abcde",
+            "api-key=abcde",
+            "access-key=abcde",
+            "private-key=abcde",
+            "safe-name=abcdef",
+        ],
+    }
+    ledger.append("tool_call_requested", payload)
+
+    ledger.write_jsonl(tmp_path / "run.jsonl")
+
+    row = json.loads((tmp_path / "run.jsonl").read_text(encoding="utf-8"))
+    assert row["data"] == {
+        "callback_url": "[REDACTED]",
+        "command": "[REDACTED]",
+        "nested": [
+            "[REDACTED]",
+            "[REDACTED]",
+            "[REDACTED]",
+            "[REDACTED]",
+            "auth-token=abcde",
+            "api-key=abcde",
+            "access-key=abcde",
+            "private-key=abcde",
+            "safe-name=abcdef",
+        ],
+    }
+    assert ledger.events[0].data == payload
+
+
+def test_write_jsonl_redacts_cli_long_option_secret_assignments_without_mutating_events(tmp_path) -> None:
+    ledger = RunLedger(run_id="cli-long-option-redaction-test")
+    payload = {
+        "command": "run-tool --api-key=abcdef --verbose",
+        "nested": [
+            "deploy --access-key=abcdef",
+            "sign --private-key=abcdef",
+            "run-tool --api-key=abcde --verbose",
+        ],
+    }
+    ledger.append("tool_call_requested", payload)
+
+    ledger.write_jsonl(tmp_path / "run.jsonl")
+
+    row = json.loads((tmp_path / "run.jsonl").read_text(encoding="utf-8"))
+    assert row["data"] == {
+        "command": "[REDACTED]",
+        "nested": [
+            "[REDACTED]",
+            "[REDACTED]",
+            "run-tool --api-key=abcde --verbose",
+        ],
+    }
+    assert ledger.events[0].data == payload
+
+
+def test_write_jsonl_redacts_custom_key_value_strings_without_mutating_events(tmp_path) -> None:
+    ledger = RunLedger(run_id="custom-key-value-redaction-test")
+    payload = {
+        "message": "session_id=abcdef",
+        "nested": ["prefix session_id=abcdef suffix", "session_id=abcde", "other_id=abcdef"],
+    }
+    ledger.append("tool_call_requested", payload)
+
+    ledger.write_jsonl(tmp_path / "run.jsonl", redact_keys={"session_id"})
+
+    row = json.loads((tmp_path / "run.jsonl").read_text(encoding="utf-8"))
+    assert row["data"] == {
+        "message": "[REDACTED]",
+        "nested": ["[REDACTED]", "session_id=abcde", "other_id=abcdef"],
+    }
+    assert ledger.events[0].data == payload
+
+
+def test_write_jsonl_redacts_custom_hyphenated_key_value_strings_without_mutating_events(tmp_path) -> None:
+    ledger = RunLedger(run_id="custom-hyphenated-key-value-redaction-test")
+    payload = {
+        "message": "session-id=abcdef",
+        "nested": ["prefix session-id=abcdef suffix", "session-id=abcde", "other-id=abcdef"],
+    }
+    ledger.append("tool_call_requested", payload)
+
+    ledger.write_jsonl(tmp_path / "run.jsonl", redact_keys={"session-id"})
+
+    row = json.loads((tmp_path / "run.jsonl").read_text(encoding="utf-8"))
+    assert row["data"] == {
+        "message": "[REDACTED]",
+        "nested": ["[REDACTED]", "session-id=abcde", "other-id=abcdef"],
+    }
+    assert ledger.events[0].data == payload
+
+
 def test_write_jsonl_redacts_bearer_scheme_case_insensitively(tmp_path) -> None:
     ledger = RunLedger(run_id="bearer-case-redaction-test")
     payload = {
