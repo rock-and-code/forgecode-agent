@@ -545,6 +545,7 @@ def test_agent_controller_stops_safely_when_supervised_policy_denies_known_shell
         "model_responded",
         "tool_call_requested",
         "policy_decision",
+        "tool_call_failed",
         "run_completed",
     ]
     assert ledger.events[4].data == {
@@ -552,6 +553,7 @@ def test_agent_controller_stops_safely_when_supervised_policy_denies_known_shell
         "allowed": False,
         "reason": "approval_required",
     }
+    assert ledger.events[5].data == {"tool": "run_shell", "reason": "approval_required"}
     assert ledger.events[-1].data == {
         "final_answer": "I need to run a command.",
         "completed": False,
