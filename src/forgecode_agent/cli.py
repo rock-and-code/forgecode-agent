@@ -122,6 +122,8 @@ def main(argv: list[str] | None = None) -> int:
 
     status = doctor_status(args.workspace)
     print("ok" if status.ok else "not ok")
+    for name, value in status.checks.items():
+        print(f"{name}: {value}")
     for message in status.messages:
         print(message)
     return 0 if status.ok else 1

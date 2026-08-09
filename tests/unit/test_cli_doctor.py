@@ -85,6 +85,26 @@ def test_main_doctor_workspace_option_uses_provided_workspace(tmp_path, monkeypa
     assert capsys.readouterr().out == "ok\n"
 
 
+def test_main_doctor_prints_checks_before_messages(tmp_path, monkeypatch, capsys) -> None:
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+
+    def fake_doctor_status(workspace_arg: Path) -> DoctorStatus:
+        return DoctorStatus(
+            ok=False,
+            workspace=workspace_arg,
+            checks={"python": "ok", "config_file": "missing"},
+            messages=["No config"],
+        )
+
+    monkeypatch.setattr(cli, "doctor_status", fake_doctor_status)
+
+    exit_code = cli.main(["doctor", "--workspace", str(workspace)])
+
+    assert exit_code == 1
+    assert capsys.readouterr().out == "not ok\npython: ok\nconfig_file: missing\nNo config\n"
+
+
 def test_main_unknown_command_returns_error(capsys) -> None:
     exit_code = cli.main(["unknown"])
 
