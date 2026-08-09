@@ -102,7 +102,9 @@ def _arguments_match_schema(schema: dict[str, Any], arguments: Any) -> bool:
         return False
     if not _any_of_matches_schema(arguments, schema, enforce_string_pattern=True):
         return False
-    if _is_any_of_only_schema(schema):
+    if not _all_of_matches_schema(arguments, schema, enforce_string_pattern=True):
+        return False
+    if _is_any_of_only_schema(schema) or _is_all_of_composition_only_schema(schema):
         return True
     if "const" in schema and not _value_matches_const(arguments, schema["const"]):
         return False
@@ -119,6 +121,8 @@ def _arguments_match_schema(schema: dict[str, Any], arguments: Any) -> bool:
         return _array_matches_schema(arguments, schema)
     if _schema_type_includes(expected_type, {"object"}) and isinstance(arguments, dict):
         if "anyOf" in schema and _is_bare_object_schema(schema):
+            return True
+        if "allOf" in schema and _is_bare_object_schema(schema):
             return True
         if _is_bare_object_property_count_schema(schema):
             return _object_property_count_matches(arguments, schema)
@@ -203,6 +207,10 @@ def _array_contains_validation_subschemas(schema: dict[str, Any]) -> list[dict[s
     any_of = schema.get("anyOf")
     if isinstance(any_of, list):
         subschemas.extend(subschema for subschema in any_of if isinstance(subschema, dict))
+
+    all_of = schema.get("allOf")
+    if isinstance(all_of, list):
+        subschemas.extend(subschema for subschema in all_of if isinstance(subschema, dict))
 
     properties = schema.get("properties")
     if isinstance(properties, dict):
@@ -306,6 +314,8 @@ def _value_matches_schema(value: Any, schema: dict[str, Any], *, enforce_string_
         return False
     if not _any_of_matches_schema(value, schema, enforce_string_pattern=enforce_string_pattern):
         return False
+    if not _all_of_matches_schema(value, schema, enforce_string_pattern=enforce_string_pattern):
+        return False
 
     if "const" in schema and not _value_matches_const(value, schema["const"]):
         return False
@@ -408,8 +418,53 @@ def _any_of_matches_schema(
     )
 
 
+def _all_of_matches_schema(
+    value: Any,
+    schema: dict[str, Any],
+    *,
+    enforce_string_pattern: bool = False,
+) -> bool:
+    if "allOf" not in schema:
+        return True
+
+    subschemas = schema["allOf"]
+    if not isinstance(subschemas, list) or len(subschemas) == 0:
+        return False
+    if any(not isinstance(subschema, dict) for subschema in subschemas):
+        return False
+
+    return all(
+        _value_matches_schema(
+            value,
+            subschema,
+            enforce_string_pattern=enforce_string_pattern,
+        )
+        for subschema in subschemas
+    )
+
+
 def _is_any_of_only_schema(schema: dict[str, Any]) -> bool:
     return set(schema.keys()) == {"anyOf"}
+
+
+_SCHEMA_ANNOTATION_KEYWORDS = frozenset(
+    {
+        "$comment",
+        "$id",
+        "$schema",
+        "default",
+        "deprecated",
+        "description",
+        "examples",
+        "readOnly",
+        "title",
+        "writeOnly",
+    }
+)
+
+
+def _is_all_of_composition_only_schema(schema: dict[str, Any]) -> bool:
+    return "allOf" in schema and set(schema.keys()) <= ({"allOf"} | _SCHEMA_ANNOTATION_KEYWORDS)
 
 
 def _is_bare_object_schema(schema: dict[str, Any]) -> bool:

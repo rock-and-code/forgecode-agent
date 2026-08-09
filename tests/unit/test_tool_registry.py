@@ -867,6 +867,116 @@ def test_tool_registry_denies_malformed_any_of_member_before_handler_runs() -> N
     ]
 
 
+def test_tool_registry_denies_all_of_property_violation_before_handler_runs() -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="read_workspace_path",
+            risk="read_only",
+            description="Read a workspace-relative path.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "allOf": [
+                            {"type": "string", "pattern": r"^[\w./-]+$"},
+                            {"type": "string", "minLength": 3},
+                        ]
+                    }
+                },
+                "required": ["path"],
+            },
+            handler=lambda path: calls.append({"path": path}),
+        )
+    )
+    arguments = {"path": "!!"}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("read_workspace_path", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "read_workspace_path",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_allows_all_of_property_when_every_subschema_matches() -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="read_workspace_path",
+            risk="read_only",
+            description="Read a workspace-relative path.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "allOf": [
+                            {"type": "string", "pattern": r"^[\w./-]+$"},
+                            {"type": "string", "minLength": 3},
+                        ]
+                    }
+                },
+                "required": ["path"],
+            },
+            handler=lambda path: calls.append({"path": path}),
+        )
+    )
+    arguments = {"path": "src/tools.py"}
+
+    result = registry.execute("read_workspace_path", arguments)
+
+    assert result is None
+    assert calls == [{"path": "src/tools.py"}]
+    assert registry.calls == [
+        {
+            "tool": "read_workspace_path",
+            "arguments": arguments,
+            "status": "completed",
+        }
+    ]
+
+
+@pytest.mark.parametrize("all_of", [[], {"type": "string"}, ["not-a-schema", {"type": "string"}]])
+def test_tool_registry_denies_malformed_all_of_schema_before_handler_runs(all_of: object) -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="read_workspace_path",
+            risk="read_only",
+            description="Read a workspace-relative path.",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"allOf": all_of}},
+                "required": ["path"],
+            },
+            handler=lambda path: calls.append({"path": path}),
+        )
+    )
+    arguments = {"path": "src/tools.py"}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("read_workspace_path", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "read_workspace_path",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
 @pytest.mark.parametrize("paths", [None, ["README.md", "pyproject.toml"]])
 def test_tool_registry_applies_nullable_array_schema_constraints(paths: object) -> None:
     calls: list[dict[str, object]] = []
@@ -3251,6 +3361,115 @@ def test_tool_registry_allows_array_item_string_pattern_match() -> None:
     assert calls == [arguments]
     assert registry.calls == [
         {"tool": "batch_read", "arguments": arguments, "status": "completed"}
+    ]
+
+
+def test_tool_registry_allows_top_level_all_of_only_schema_when_every_subschema_matches() -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="read_file",
+            risk="read_only",
+            description="Read a safe markdown path.",
+            parameters={
+                "allOf": [
+                    {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"],
+                    },
+                    {
+                        "type": "object",
+                        "properties": {"path": {"type": "string", "pattern": r"^[A-Za-z0-9_./-]+\.md$"}},
+                        "required": ["path"],
+                    },
+                ]
+            },
+            handler=lambda path: calls.append({"path": path}),
+        )
+    )
+    arguments = {"path": "docs/README.md"}
+
+    result = registry.execute("read_file", arguments)
+
+    assert result is None
+    assert calls == [arguments]
+    assert registry.calls == [
+        {"tool": "read_file", "arguments": arguments, "status": "completed"}
+    ]
+
+
+def test_tool_registry_allows_top_level_typed_object_all_of_when_every_subschema_matches() -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="read_file",
+            risk="read_only",
+            description="Read a safe markdown path.",
+            parameters={
+                "type": "object",
+                "allOf": [
+                    {
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"],
+                    },
+                    {
+                        "properties": {"path": {"type": "string", "pattern": r"^[A-Za-z0-9_./-]+\.md$"}},
+                        "required": ["path"],
+                    },
+                ],
+            },
+            handler=lambda path: calls.append({"path": path}),
+        )
+    )
+    arguments = {"path": "docs/README.md"}
+
+    result = registry.execute("read_file", arguments)
+
+    assert result is None
+    assert calls == [arguments]
+    assert registry.calls == [
+        {"tool": "read_file", "arguments": arguments, "status": "completed"}
+    ]
+
+
+@pytest.mark.parametrize("annotation_keyword", ["description", "deprecated", "readOnly", "writeOnly", "$schema"])
+def test_tool_registry_allows_top_level_all_of_with_annotation_siblings(annotation_keyword: str) -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="read_file",
+            risk="read_only",
+            description="Read a safe markdown path.",
+            parameters={
+                annotation_keyword: "A documented allOf schema.",
+                "allOf": [
+                    {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"],
+                    },
+                    {
+                        "type": "object",
+                        "properties": {"path": {"type": "string", "pattern": r"^[A-Za-z0-9_./-]+\.md$"}},
+                        "required": ["path"],
+                    },
+                ],
+            },
+            handler=lambda path: calls.append({"path": path}),
+        )
+    )
+    arguments = {"path": "docs/README.md"}
+
+    result = registry.execute("read_file", arguments)
+
+    assert result is None
+    assert calls == [arguments]
+    assert registry.calls == [
+        {"tool": "read_file", "arguments": arguments, "status": "completed"}
     ]
 
 
