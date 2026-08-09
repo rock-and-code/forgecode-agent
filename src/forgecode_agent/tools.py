@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -126,10 +127,10 @@ def _object_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
             if name not in properties:
                 return False
 
-    return all(_value_matches_schema(item, properties.get(name, {})) for name, item in value.items())
+    return all(_value_matches_schema(item, properties.get(name, {}), enforce_string_pattern=True) for name, item in value.items())
 
 
-def _value_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
+def _value_matches_schema(value: Any, schema: dict[str, Any], *, enforce_string_pattern: bool = False) -> bool:
     if "const" in schema and not _value_matches_const(value, schema["const"]):
         return False
 
@@ -152,6 +153,8 @@ def _value_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
     if expected_type == "string" and "minLength" in schema and len(value) < schema["minLength"]:
         return False
     if expected_type == "string" and "maxLength" in schema and len(value) > schema["maxLength"]:
+        return False
+    if enforce_string_pattern and expected_type == "string" and "pattern" in schema and re.search(schema["pattern"], value) is None:
         return False
 
     return True

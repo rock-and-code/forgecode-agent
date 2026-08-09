@@ -1139,6 +1139,123 @@ def test_tool_registry_allows_object_property_string_length_boundaries(
     ]
 
 
+def test_tool_registry_denies_object_property_string_pattern_mismatch_before_handler_runs() -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="read_file",
+            risk="read_only",
+            description="Read a safe workspace path.",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string", "pattern": r"^[A-Za-z0-9_./-]+$"}},
+                "required": ["path"],
+            },
+            handler=lambda path: calls.append({"path": path}),
+        )
+    )
+    arguments = {"path": "README.md; rm -rf /"}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("read_file", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "read_file",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_allows_object_property_string_pattern_match() -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="read_file",
+            risk="read_only",
+            description="Read a safe workspace path.",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string", "pattern": r"^[A-Za-z0-9_./-]+$"}},
+                "required": ["path"],
+            },
+            handler=lambda path: calls.append({"path": path}),
+        )
+    )
+    arguments = {"path": "src/forgecode_agent/tools.py"}
+
+    result = registry.execute("read_file", arguments)
+
+    assert result is None
+    assert calls == [{"path": "src/forgecode_agent/tools.py"}]
+    assert registry.calls == [
+        {"tool": "read_file", "arguments": arguments, "status": "completed"}
+    ]
+
+
+def test_tool_registry_allows_object_property_string_unanchored_pattern_search_match() -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="read_file",
+            risk="read_only",
+            description="Read a matching path.",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string", "pattern": r"README"}},
+                "required": ["path"],
+            },
+            handler=lambda path: calls.append({"path": path}),
+        )
+    )
+    arguments = {"path": "docs/README.md"}
+
+    result = registry.execute("read_file", arguments)
+
+    assert result is None
+    assert calls == [{"path": "docs/README.md"}]
+    assert registry.calls == [
+        {"tool": "read_file", "arguments": arguments, "status": "completed"}
+    ]
+
+
+def test_tool_registry_ignores_top_level_array_item_string_pattern_for_this_slice() -> None:
+    calls: list[list[str]] = []
+
+    def handler(paths: list[str]) -> dict[str, int]:
+        calls.append(paths)
+        return {"count": len(paths)}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_read",
+            risk="read_only",
+            description="Read multiple paths.",
+            parameters={
+                "type": "array",
+                "items": {"type": "string", "pattern": r"^safe-"},
+            },
+            handler=handler,
+        )
+    )
+    arguments = ["unsafe"]
+
+    result = registry.execute("batch_read", arguments)
+
+    assert result == {"count": 1}
+    assert calls == [["unsafe"]]
+    assert registry.calls == [
+        {"tool": "batch_read", "arguments": arguments, "status": "completed"}
+    ]
+
+
 def test_tool_registry_denies_unknown_arguments_for_empty_schema_before_handler_runs() -> None:
     calls: list[dict[str, str]] = []
     registry = ToolRegistry()
