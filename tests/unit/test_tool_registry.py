@@ -144,6 +144,224 @@ def test_tool_registry_denies_integer_argument_type_mismatch_before_handler_runs
     ]
 
 
+@pytest.mark.parametrize("note", ["optional note", None])
+def test_tool_registry_allows_nullable_union_argument_types(note: str | None) -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="annotate",
+            risk="read_only",
+            description="Record an optional note.",
+            parameters={
+                "type": "object",
+                "properties": {"note": {"type": ["string", "null"]}},
+                "required": ["note"],
+            },
+            handler=lambda note: calls.append({"note": note}),
+        )
+    )
+    arguments = {"note": note}
+
+    result = registry.execute("annotate", arguments)
+
+    assert result is None
+    assert calls == [{"note": note}]
+    assert registry.calls == [
+        {"tool": "annotate", "arguments": arguments, "status": "completed"}
+    ]
+
+
+@pytest.mark.parametrize("note", [123, True])
+def test_tool_registry_denies_nullable_union_argument_type_mismatch_before_handler_runs(
+    note: object,
+) -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="annotate",
+            risk="read_only",
+            description="Record an optional note.",
+            parameters={
+                "type": "object",
+                "properties": {"note": {"type": ["string", "null"]}},
+                "required": ["note"],
+            },
+            handler=lambda note: calls.append({"note": note}),
+        )
+    )
+    arguments = {"note": note}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("annotate", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "annotate",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize("paths", [None, ["README.md", "pyproject.toml"]])
+def test_tool_registry_applies_nullable_array_schema_constraints(paths: object) -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_read",
+            risk="read_only",
+            description="Read an optional batch of paths.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "paths": {
+                        "type": ["array", "null"],
+                        "items": {"type": "string"},
+                        "minItems": 2,
+                    }
+                },
+                "required": ["paths"],
+            },
+            handler=lambda paths: calls.append({"paths": paths}),
+        )
+    )
+    arguments = {"paths": paths}
+
+    result = registry.execute("batch_read", arguments)
+
+    assert result is None
+    assert calls == [{"paths": paths}]
+    assert registry.calls == [
+        {"tool": "batch_read", "arguments": arguments, "status": "completed"}
+    ]
+
+
+@pytest.mark.parametrize("paths", [["README.md", 123], ["README.md"]])
+def test_tool_registry_denies_nullable_array_schema_violations_before_handler_runs(
+    paths: object,
+) -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_read",
+            risk="read_only",
+            description="Read an optional batch of paths.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "paths": {
+                        "type": ["array", "null"],
+                        "items": {"type": "string"},
+                        "minItems": 2,
+                    }
+                },
+                "required": ["paths"],
+            },
+            handler=lambda paths: calls.append({"paths": paths}),
+        )
+    )
+    arguments = {"paths": paths}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("batch_read", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "batch_read",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize("config", [None, {"source": "README.md"}])
+def test_tool_registry_applies_nullable_object_schema_constraints(config: object) -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="copy_source",
+            risk="read_only",
+            description="Copy from an optional source config.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "config": {
+                        "type": ["object", "null"],
+                        "required": ["source"],
+                        "properties": {"source": {"type": "string"}},
+                        "additionalProperties": False,
+                    }
+                },
+                "required": ["config"],
+            },
+            handler=lambda config: calls.append({"config": config}),
+        )
+    )
+    arguments = {"config": config}
+
+    result = registry.execute("copy_source", arguments)
+
+    assert result is None
+    assert calls == [{"config": config}]
+    assert registry.calls == [
+        {"tool": "copy_source", "arguments": arguments, "status": "completed"}
+    ]
+
+
+@pytest.mark.parametrize(
+    "config",
+    [{}, {"source": "README.md", "extra": True}, {"source": 123}],
+)
+def test_tool_registry_denies_nullable_object_schema_violations_before_handler_runs(
+    config: object,
+) -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="copy_source",
+            risk="read_only",
+            description="Copy from an optional source config.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "config": {
+                        "type": ["object", "null"],
+                        "required": ["source"],
+                        "properties": {"source": {"type": "string"}},
+                        "additionalProperties": False,
+                    }
+                },
+                "required": ["config"],
+            },
+            handler=lambda config: calls.append({"config": config}),
+        )
+    )
+    arguments = {"config": config}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("copy_source", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "copy_source",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
 @pytest.mark.parametrize("arguments", [{"count": 0}, {"count": 6}])
 def test_tool_registry_denies_integer_argument_bounds_before_handler_runs(
     arguments: dict[str, int],
@@ -523,6 +741,137 @@ def test_tool_registry_denies_dict_for_array_schema_before_handler_runs() -> Non
     assert registry.calls == [
         {
             "tool": "batch_read",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize("arguments", [None, ["README.md", "pyproject.toml"]])
+def test_tool_registry_allows_root_nullable_array_schema(arguments: object) -> None:
+    calls: list[object] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_read",
+            risk="read_only",
+            description="Read an optional batch of paths.",
+            parameters={
+                "type": ["array", "null"],
+                "items": {"type": "string"},
+                "minItems": 2,
+            },
+            handler=lambda paths: calls.append(paths),
+        )
+    )
+
+    result = registry.execute("batch_read", arguments)
+
+    assert result is None
+    assert calls == [arguments]
+    assert registry.calls == [
+        {"tool": "batch_read", "arguments": arguments, "status": "completed"}
+    ]
+
+
+@pytest.mark.parametrize("arguments", [["README.md", 123], ["README.md"]])
+def test_tool_registry_denies_root_nullable_array_schema_violations_before_handler_runs(
+    arguments: object,
+) -> None:
+    calls: list[object] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_read",
+            risk="read_only",
+            description="Read an optional batch of paths.",
+            parameters={
+                "type": ["array", "null"],
+                "items": {"type": "string"},
+                "minItems": 2,
+            },
+            handler=lambda paths: calls.append(paths),
+        )
+    )
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("batch_read", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "batch_read",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize("arguments", [None, {"source": "README.md"}])
+def test_tool_registry_allows_root_nullable_object_schema(arguments: object) -> None:
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def handler(*args: object, **kwargs: object) -> None:
+        calls.append((args, kwargs))
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="load_config",
+            risk="read_only",
+            description="Load an optional config.",
+            parameters={
+                "type": ["object", "null"],
+                "required": ["source"],
+                "properties": {"source": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            handler=handler,
+        )
+    )
+
+    result = registry.execute("load_config", arguments)
+
+    assert result is None
+    if arguments is None:
+        assert calls == [((None,), {})]
+    else:
+        assert calls == [((), arguments)]
+    assert registry.calls == [
+        {"tool": "load_config", "arguments": arguments, "status": "completed"}
+    ]
+
+
+@pytest.mark.parametrize("arguments", [{}, {"source": 123}, {"source": "README.md", "extra": "x"}])
+def test_tool_registry_denies_root_nullable_object_schema_violations_before_handler_runs(
+    arguments: object,
+) -> None:
+    calls: list[object] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="load_config",
+            risk="read_only",
+            description="Load an optional config.",
+            parameters={
+                "type": ["object", "null"],
+                "required": ["source"],
+                "properties": {"source": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            handler=lambda config: calls.append(config),
+        )
+    )
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("load_config", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "load_config",
             "arguments": arguments,
             "status": "denied",
             "reason": "invalid_arguments",
