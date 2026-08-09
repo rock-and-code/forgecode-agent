@@ -729,6 +729,75 @@ def test_tool_registry_denies_array_length_constraints_before_handler_runs(
     ]
 
 
+def test_tool_registry_denies_duplicate_array_items_when_unique_items_true_before_handler_runs() -> None:
+    calls: list[list[str]] = []
+
+    def handler(paths: list[str]) -> dict[str, int]:
+        calls.append(paths)
+        return {"count": len(paths)}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_read",
+            risk="read_only",
+            description="Read multiple files.",
+            parameters={
+                "type": "array",
+                "items": {"type": "string"},
+                "uniqueItems": True,
+            },
+            handler=handler,
+        )
+    )
+    arguments = ["README.md", "README.md"]
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("batch_read", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "batch_read",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_allows_unique_array_items_when_unique_items_true() -> None:
+    calls: list[list[str]] = []
+
+    def handler(paths: list[str]) -> dict[str, int]:
+        calls.append(paths)
+        return {"count": len(paths)}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_read",
+            risk="read_only",
+            description="Read multiple files.",
+            parameters={
+                "type": "array",
+                "items": {"type": "string"},
+                "uniqueItems": True,
+            },
+            handler=handler,
+        )
+    )
+    arguments = ["README.md", "pyproject.toml"]
+
+    result = registry.execute("batch_read", arguments)
+
+    assert result == {"count": 2}
+    assert calls == [arguments]
+    assert registry.calls == [
+        {"tool": "batch_read", "arguments": arguments, "status": "completed"}
+    ]
+
+
 def test_tool_registry_executes_array_schema_with_list_as_single_positional_argument() -> None:
     calls: list[list[str]] = []
 

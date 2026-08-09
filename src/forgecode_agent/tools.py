@@ -109,8 +109,17 @@ def _array_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
         return False
     if "maxItems" in schema and len(value) > schema["maxItems"]:
         return False
+    if schema.get("uniqueItems") is True and not _array_items_are_unique(value):
+        return False
     item_schema = schema.get("items", {})
     return all(_value_matches_schema(item, item_schema, enforce_string_pattern=True) for item in value)
+
+
+def _array_items_are_unique(value: list[Any]) -> bool:
+    for index, item in enumerate(value):
+        if any(_value_matches_const(item, other) for other in value[index + 1 :]):
+            return False
+    return True
 
 
 def _object_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
