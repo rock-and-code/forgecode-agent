@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
 from forgecode_agent.policy import ApprovalPolicy
@@ -195,6 +196,13 @@ def _value_matches_schema(value: Any, schema: dict[str, Any], *, enforce_string_
     ):
         return False
     if (
+        _schema_type_includes(expected_type, {"integer", "number"})
+        and _value_matches_type(value, "number")
+        and "multipleOf" in schema
+        and not _value_is_multiple_of(value, schema["multipleOf"])
+    ):
+        return False
+    if (
         _schema_type_includes(expected_type, {"string"})
         and _value_matches_type(value, "string")
         and "minLength" in schema
@@ -253,6 +261,24 @@ def _schema_type_includes(expected_type: Any, type_names: set[str]) -> bool:
     if isinstance(expected_type, list):
         return any(type_name in type_names for type_name in expected_type)
     return expected_type in type_names
+
+
+def _value_is_multiple_of(value: int | float, divisor: Any) -> bool:
+    if not _value_matches_type(divisor, "number"):
+        return False
+
+    try:
+        decimal_value = Decimal(str(value))
+        decimal_divisor = Decimal(str(divisor))
+        if (
+            not decimal_value.is_finite()
+            or not decimal_divisor.is_finite()
+            or decimal_divisor <= 0
+        ):
+            return False
+        return decimal_value % decimal_divisor == 0
+    except (InvalidOperation, ValueError):
+        return False
 
 
 def _value_matches_type(value: Any, expected_type: Any) -> bool:

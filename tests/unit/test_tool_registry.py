@@ -552,6 +552,202 @@ def test_tool_registry_allows_number_argument_bounds(temperature: float) -> None
     ]
 
 
+@pytest.mark.parametrize("count", [5, 7])
+def test_tool_registry_denies_integer_argument_multiple_of_before_handler_runs(
+    count: int,
+) -> None:
+    calls: list[dict[str, int]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="repeat",
+            risk="read_only",
+            description="Repeat a message a number of times.",
+            parameters={
+                "type": "object",
+                "properties": {"count": {"type": "integer", "multipleOf": 3}},
+                "required": ["count"],
+            },
+            handler=lambda count: calls.append({"count": count}),
+        )
+    )
+    arguments = {"count": count}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("repeat", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "repeat",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize("count", [0, 3, 6])
+def test_tool_registry_allows_integer_argument_multiple_of(count: int) -> None:
+    calls: list[dict[str, int]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="repeat",
+            risk="read_only",
+            description="Repeat a message a number of times.",
+            parameters={
+                "type": "object",
+                "properties": {"count": {"type": "integer", "multipleOf": 3}},
+                "required": ["count"],
+            },
+            handler=lambda count: calls.append({"count": count}),
+        )
+    )
+    arguments = {"count": count}
+
+    result = registry.execute("repeat", arguments)
+
+    assert result is None
+    assert calls == [{"count": count}]
+    assert registry.calls == [
+        {"tool": "repeat", "arguments": arguments, "status": "completed"}
+    ]
+
+
+@pytest.mark.parametrize("temperature", [0.15, 0.26])
+def test_tool_registry_denies_number_argument_multiple_of_before_handler_runs(
+    temperature: float,
+) -> None:
+    calls: list[dict[str, float]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="sample",
+            risk="read_only",
+            description="Sample with a numeric temperature.",
+            parameters={
+                "type": "object",
+                "properties": {"temperature": {"type": "number", "multipleOf": 0.25}},
+                "required": ["temperature"],
+            },
+            handler=lambda temperature: calls.append({"temperature": temperature}),
+        )
+    )
+    arguments = {"temperature": temperature}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("sample", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "sample",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize("temperature", [0.0, 0.25, 1.0])
+def test_tool_registry_allows_number_argument_multiple_of(temperature: float) -> None:
+    calls: list[dict[str, float]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="sample",
+            risk="read_only",
+            description="Sample with a numeric temperature.",
+            parameters={
+                "type": "object",
+                "properties": {"temperature": {"type": "number", "multipleOf": 0.25}},
+                "required": ["temperature"],
+            },
+            handler=lambda temperature: calls.append({"temperature": temperature}),
+        )
+    )
+    arguments = {"temperature": temperature}
+
+    result = registry.execute("sample", arguments)
+
+    assert result is None
+    assert calls == [{"temperature": temperature}]
+    assert registry.calls == [
+        {"tool": "sample", "arguments": arguments, "status": "completed"}
+    ]
+
+
+@pytest.mark.parametrize("divisor", [0, -0.25, "0.25"])
+def test_tool_registry_denies_malformed_multiple_of_schema_before_handler_runs(
+    divisor: object,
+) -> None:
+    calls: list[dict[str, float]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="sample",
+            risk="read_only",
+            description="Sample with a numeric temperature.",
+            parameters={
+                "type": "object",
+                "properties": {"temperature": {"type": "number", "multipleOf": divisor}},
+                "required": ["temperature"],
+            },
+            handler=lambda temperature: calls.append({"temperature": temperature}),
+        )
+    )
+    arguments = {"temperature": 0.5}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("sample", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "sample",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize("temperature", [1e100, float("inf"), float("nan")])
+def test_tool_registry_denies_multiple_of_values_that_cannot_be_checked_without_crashing(
+    temperature: float,
+) -> None:
+    calls: list[dict[str, float]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="sample",
+            risk="read_only",
+            description="Sample with a numeric temperature.",
+            parameters={
+                "type": "object",
+                "properties": {"temperature": {"type": "number", "multipleOf": 0.1}},
+                "required": ["temperature"],
+            },
+            handler=lambda temperature: calls.append({"temperature": temperature}),
+        )
+    )
+    arguments = {"temperature": temperature}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("sample", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "sample",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
 def test_tool_registry_denies_boolean_argument_type_mismatch_before_handler_runs() -> None:
     calls: list[dict[str, object]] = []
     registry = ToolRegistry()
