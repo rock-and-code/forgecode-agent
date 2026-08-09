@@ -176,6 +176,38 @@ def test_tool_registry_denies_boolean_argument_type_mismatch_before_handler_runs
     ]
 
 
+def test_tool_registry_denies_object_argument_type_mismatch_before_handler_runs() -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="annotate",
+            risk="read_only",
+            description="Annotate with metadata.",
+            parameters={
+                "type": "object",
+                "required": ["metadata"],
+                "properties": {"metadata": {"type": "object"}},
+            },
+            handler=lambda metadata: calls.append({"metadata": metadata}),
+        )
+    )
+    arguments = {"metadata": "not an object"}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("annotate", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "annotate",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
 @pytest.mark.parametrize("arguments", [None, ["README.md"], "README.md"])
 def test_tool_registry_denies_non_dict_arguments_before_handler_runs(
     read_file_tool: ToolDefinition,

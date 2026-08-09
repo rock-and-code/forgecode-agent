@@ -135,4 +135,6 @@ def _value_matches_type(value: Any, expected_type: Any) -> bool:
         return isinstance(value, int) and not isinstance(value, bool)
     if expected_type == "boolean":
         return isinstance(value, bool)
+    if expected_type == "object":
+        return isinstance(value, dict)
     return True
