@@ -271,6 +271,69 @@ def test_tool_registry_allows_number_arguments(temperature: float | int) -> None
     ]
 
 
+@pytest.mark.parametrize("temperature", [-0.1, 1.1])
+def test_tool_registry_denies_number_argument_bounds_before_handler_runs(
+    temperature: float,
+) -> None:
+    calls: list[dict[str, float]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="sample",
+            risk="read_only",
+            description="Sample with a numeric temperature.",
+            parameters={
+                "type": "object",
+                "properties": {"temperature": {"type": "number", "minimum": 0.0, "maximum": 1.0}},
+                "required": ["temperature"],
+            },
+            handler=lambda temperature: calls.append({"temperature": temperature}),
+        )
+    )
+    arguments = {"temperature": temperature}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("sample", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "sample",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize("temperature", [0.0, 0.5, 1.0])
+def test_tool_registry_allows_number_argument_bounds(temperature: float) -> None:
+    calls: list[dict[str, float]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="sample",
+            risk="read_only",
+            description="Sample with a numeric temperature.",
+            parameters={
+                "type": "object",
+                "properties": {"temperature": {"type": "number", "minimum": 0.0, "maximum": 1.0}},
+                "required": ["temperature"],
+            },
+            handler=lambda temperature: calls.append({"temperature": temperature}),
+        )
+    )
+    arguments = {"temperature": temperature}
+
+    result = registry.execute("sample", arguments)
+
+    assert result is None
+    assert calls == [{"temperature": temperature}]
+    assert registry.calls == [
+        {"tool": "sample", "arguments": arguments, "status": "completed"}
+    ]
+
+
 def test_tool_registry_denies_boolean_argument_type_mismatch_before_handler_runs() -> None:
     calls: list[dict[str, object]] = []
     registry = ToolRegistry()
