@@ -75,6 +75,21 @@ class RunLedger:
         self.events.append(event)
         return event
 
+    @classmethod
+    def read_jsonl(cls, path: str | Path) -> RunLedger:
+        input_path = Path(path)
+        rows = [json.loads(line) for line in input_path.read_text(encoding="utf-8").splitlines() if line]
+        if not rows:
+            raise ValueError("Cannot read empty JSONL ledger")
+
+        run_id = rows[0]["run_id"]
+        if any(row["run_id"] != run_id for row in rows):
+            raise ValueError("Cannot read JSONL ledger with mixed run_id rows")
+
+        ledger = cls(run_id=run_id)
+        ledger.events = [LedgerEvent(type=row["type"], data=row["data"], timestamp=row["timestamp"]) for row in rows]
+        return ledger
+
     def write_jsonl(self, path: str | Path, *, redact_keys: set[str] | None = None) -> None:
         output_path = Path(path)
         output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -33,6 +33,57 @@ def test_write_jsonl_persists_ordered_events_with_run_id_and_stable_keys(tmp_pat
     assert [json.loads(line)["type"] for line in lines] == ["run_started", "run_completed"]
 
 
+def test_read_jsonl_reloads_persisted_events_in_file_order(tmp_path) -> None:
+    ledger = RunLedger(run_id="reload-test")
+    ledger.append("run_started", {"goal": "reload"})
+    ledger.append("run_completed", {"completed": True, "items": [1, 2]})
+    output_path = tmp_path / "run.jsonl"
+    ledger.write_jsonl(output_path)
+
+    reloaded = RunLedger.read_jsonl(output_path)
+
+    assert reloaded.run_id == "reload-test"
+    assert [event.type for event in reloaded.events] == ["run_started", "run_completed"]
+    assert [event.data for event in reloaded.events] == [
+        {"goal": "reload"},
+        {"completed": True, "items": [1, 2]},
+    ]
+    assert [event.timestamp for event in reloaded.events] == [0, 1]
+
+
+def test_read_jsonl_rejects_empty_files(tmp_path) -> None:
+    output_path = tmp_path / "empty.jsonl"
+    output_path.write_text("", encoding="utf-8")
+
+    try:
+        RunLedger.read_jsonl(output_path)
+    except ValueError as exc:
+        assert "empty" in str(exc).lower()
+    else:
+        raise AssertionError("Expected ValueError for empty JSONL ledger")
+
+
+def test_read_jsonl_rejects_mixed_run_ids(tmp_path) -> None:
+    output_path = tmp_path / "mixed.jsonl"
+    output_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "one", "data": {}, "timestamp": 0, "run_id": "first"}),
+                json.dumps({"type": "two", "data": {}, "timestamp": 1, "run_id": "second"}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    try:
+        RunLedger.read_jsonl(output_path)
+    except ValueError as exc:
+        assert "mixed" in str(exc).lower() or "same run_id" in str(exc).lower()
+    else:
+        raise AssertionError("Expected ValueError for mixed run_id JSONL ledger")
+
+
 def test_write_jsonl_redacts_default_secret_keys_recursively_without_mutating_events(tmp_path) -> None:
     ledger = RunLedger(run_id="redaction-test")
     sensitive_payload = {
