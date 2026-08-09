@@ -144,8 +144,14 @@ def _object_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
         if required_name not in value:
             return False
 
+    if not _dependent_required_matches(value, schema):
+        return False
+
     properties = schema.get("properties", {})
-    additional_properties = schema.get("additionalProperties", False)
+    additional_properties = schema.get(
+        "additionalProperties",
+        "dependentRequired" in schema and "properties" not in schema,
+    )
 
     for name, item in value.items():
         if name in properties:
@@ -233,6 +239,7 @@ def _is_bare_object_schema(schema: dict[str, Any]) -> bool:
         _schema_type_includes(schema.get("type"), {"object"})
         and "properties" not in schema
         and "required" not in schema
+        and "dependentRequired" not in schema
         and "additionalProperties" not in schema
         and "minProperties" not in schema
         and "maxProperties" not in schema
@@ -244,6 +251,7 @@ def _is_bare_object_property_count_schema(schema: dict[str, Any]) -> bool:
         _schema_type_includes(schema.get("type"), {"object"})
         and "properties" not in schema
         and "required" not in schema
+        and "dependentRequired" not in schema
         and "additionalProperties" not in schema
         and ("minProperties" in schema or "maxProperties" in schema)
     )
@@ -254,6 +262,22 @@ def _object_property_count_matches(value: dict[str, Any], schema: dict[str, Any]
         return False
     if "maxProperties" in schema and len(value) > schema["maxProperties"]:
         return False
+    return True
+
+
+def _dependent_required_matches(value: dict[str, Any], schema: dict[str, Any]) -> bool:
+    dependent_required = schema.get("dependentRequired", {})
+    if not isinstance(dependent_required, dict):
+        return False
+
+    for property_name, required_names in dependent_required.items():
+        if not isinstance(property_name, str) or not isinstance(required_names, list):
+            return False
+        if not all(isinstance(required_name, str) for required_name in required_names):
+            return False
+        if property_name in value and any(required_name not in value for required_name in required_names):
+            return False
+
     return True
 
 

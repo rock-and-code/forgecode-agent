@@ -83,6 +83,151 @@ def test_tool_registry_denies_missing_required_arguments_before_handler_runs(
     ]
 
 
+def test_tool_registry_denies_top_level_dependent_required_missing_dependency_before_handler_runs() -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="charge_card",
+            risk="read_only",
+            description="Charge a credit card.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "credit_card": {"type": "string"},
+                    "billing_address": {"type": "string"},
+                },
+                "dependentRequired": {"credit_card": ["billing_address"]},
+            },
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+    arguments = {"credit_card": "4111"}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("charge_card", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "charge_card",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_allows_top_level_dependent_required_when_dependency_present() -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="charge_card",
+            risk="read_only",
+            description="Charge a credit card.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "credit_card": {"type": "string"},
+                    "billing_address": {"type": "string"},
+                },
+                "dependentRequired": {"credit_card": ["billing_address"]},
+            },
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+    arguments = {"credit_card": "4111", "billing_address": "123 Main"}
+
+    result = registry.execute("charge_card", arguments)
+
+    assert result is None
+    assert calls == [arguments]
+    assert registry.calls == [
+        {"tool": "charge_card", "arguments": arguments, "status": "completed"}
+    ]
+
+
+def test_tool_registry_dependency_only_dependent_required_allows_valid_objects_and_denies_missing_dependency() -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="charge_card",
+            risk="read_only",
+            description="Charge a credit card.",
+            parameters={
+                "type": "object",
+                "dependentRequired": {"credit_card": ["billing_address"]},
+            },
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+
+    satisfied_dependency = {"credit_card": "4111", "billing_address": "123 Main"}
+    assert registry.execute("charge_card", satisfied_dependency) is None
+
+    non_triggered_dependency = {"billing_address": "123 Main"}
+    assert registry.execute("charge_card", non_triggered_dependency) is None
+
+    missing_dependency = {"credit_card": "4111"}
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("charge_card", missing_dependency)
+
+    assert calls == [satisfied_dependency, non_triggered_dependency]
+    assert registry.calls == [
+        {"tool": "charge_card", "arguments": satisfied_dependency, "status": "completed"},
+        {"tool": "charge_card", "arguments": non_triggered_dependency, "status": "completed"},
+        {
+            "tool": "charge_card",
+            "arguments": missing_dependency,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        },
+    ]
+
+
+def test_tool_registry_denies_nested_dependent_required_missing_dependency_before_handler_runs() -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="checkout",
+            risk="read_only",
+            description="Checkout with payment details.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "payment": {
+                        "type": "object",
+                        "properties": {
+                            "credit_card": {"type": "string"},
+                            "billing_address": {"type": "string"},
+                        },
+                        "dependentRequired": {"credit_card": ["billing_address"]},
+                    }
+                },
+                "required": ["payment"],
+            },
+            handler=lambda payment: calls.append({"payment": payment}),
+        )
+    )
+    arguments = {"payment": {"credit_card": "4111"}}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("checkout", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "checkout",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
 def test_tool_registry_denies_argument_type_mismatch_before_handler_runs(
     read_file_tool: ToolDefinition,
 ) -> None:
