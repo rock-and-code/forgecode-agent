@@ -94,6 +94,8 @@ class ToolRegistry:
 
 
 def _arguments_match_schema(schema: dict[str, Any], arguments: Any) -> bool:
+    if "const" in schema and not _value_matches_const(arguments, schema["const"]):
+        return False
     if schema.get("type") == "array":
         return _array_matches_schema(arguments, schema)
     return _object_matches_schema(arguments, schema)
@@ -128,6 +130,9 @@ def _object_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
 
 
 def _value_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
+    if "const" in schema and not _value_matches_const(value, schema["const"]):
+        return False
+
     expected_type = schema.get("type")
     if expected_type == "array":
         return _array_matches_schema(value, schema)
@@ -173,3 +178,17 @@ def _value_matches_type(value: Any, expected_type: Any) -> bool:
     if expected_type == "object":
         return isinstance(value, dict)
     return True
+
+
+def _value_matches_const(value: Any, const: Any) -> bool:
+    if type(value) is not type(const):
+        return False
+    if isinstance(value, dict):
+        if value.keys() != const.keys():
+            return False
+        return all(_value_matches_const(value[key], const[key]) for key in value)
+    if isinstance(value, list):
+        if len(value) != len(const):
+            return False
+        return all(_value_matches_const(item, const_item) for item, const_item in zip(value, const))
+    return value == const

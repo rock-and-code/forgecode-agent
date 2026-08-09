@@ -917,6 +917,165 @@ def test_tool_registry_denies_object_property_string_not_in_enum_before_handler_
     ]
 
 
+def test_tool_registry_denies_object_property_const_mismatch_before_handler_runs() -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="set_mode",
+            risk="read_only",
+            description="Set a fixed mode.",
+            parameters={
+                "type": "object",
+                "properties": {"mode": {"type": "string", "const": "safe"}},
+                "required": ["mode"],
+            },
+            handler=lambda mode: calls.append({"mode": mode}),
+        )
+    )
+    arguments = {"mode": "unsafe"}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("set_mode", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "set_mode",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_allows_object_property_const_match() -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="set_mode",
+            risk="read_only",
+            description="Set a fixed mode.",
+            parameters={
+                "type": "object",
+                "properties": {"mode": {"type": "string", "const": "safe"}},
+                "required": ["mode"],
+            },
+            handler=lambda mode: calls.append({"mode": mode}),
+        )
+    )
+    arguments = {"mode": "safe"}
+
+    result = registry.execute("set_mode", arguments)
+
+    assert result is None
+    assert calls == [{"mode": "safe"}]
+    assert registry.calls == [
+        {"tool": "set_mode", "arguments": arguments, "status": "completed"}
+    ]
+
+
+def test_tool_registry_denies_top_level_object_const_mismatch_before_handler_runs() -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="fixed_mode",
+            risk="read_only",
+            description="Run with one exact argument object.",
+            parameters={
+                "type": "object",
+                "const": {"mode": "safe"},
+                "properties": {"mode": {"type": "string"}},
+                "required": ["mode"],
+            },
+            handler=lambda mode: calls.append({"mode": mode}),
+        )
+    )
+    arguments = {"mode": "unsafe"}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("fixed_mode", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "fixed_mode",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_allows_top_level_object_const_match() -> None:
+    calls: list[dict[str, str]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="fixed_mode",
+            risk="read_only",
+            description="Run with one exact argument object.",
+            parameters={
+                "type": "object",
+                "const": {"mode": "safe"},
+                "properties": {"mode": {"type": "string"}},
+                "required": ["mode"],
+            },
+            handler=lambda mode: calls.append({"mode": mode}),
+        )
+    )
+    arguments = {"mode": "safe"}
+
+    result = registry.execute("fixed_mode", arguments)
+
+    assert result is None
+    assert calls == [{"mode": "safe"}]
+    assert registry.calls == [
+        {"tool": "fixed_mode", "arguments": arguments, "status": "completed"}
+    ]
+
+
+def test_tool_registry_denies_nested_bool_int_const_mismatch_before_handler_runs() -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="set_flags",
+            risk="read_only",
+            description="Set exact nested flags.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "options": {
+                        "type": "object",
+                        "const": {"flag": 1},
+                        "properties": {"flag": {"type": "boolean"}},
+                        "required": ["flag"],
+                    }
+                },
+                "required": ["options"],
+            },
+            handler=lambda options: calls.append({"options": options}),
+        )
+    )
+    arguments = {"options": {"flag": True}}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("set_flags", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "set_flags",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
 @pytest.mark.parametrize("arguments", [{"name": "ab"}, {"name": "abcdef"}])
 def test_tool_registry_denies_object_property_string_length_constraints_before_handler_runs(
     arguments: dict[str, str],
