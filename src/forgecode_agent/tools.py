@@ -103,6 +103,8 @@ def _arguments_match_schema(schema: dict[str, Any], arguments: Any) -> bool:
     if _schema_type_includes(expected_type, {"array"}) and isinstance(arguments, list):
         return _array_matches_schema(arguments, schema)
     if _schema_type_includes(expected_type, {"object"}) and isinstance(arguments, dict):
+        if _is_bare_object_property_count_schema(schema):
+            return _object_property_count_matches(arguments, schema)
         return _object_matches_schema(arguments, schema)
     return _value_matches_schema(arguments, schema)
 
@@ -133,6 +135,8 @@ def _array_items_are_unique(value: list[Any]) -> bool:
 
 def _object_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
     if not isinstance(value, dict):
+        return False
+    if not _object_property_count_matches(value, schema):
         return False
 
     for required_name in schema.get("required", []):
@@ -167,7 +171,9 @@ def _value_matches_schema(value: Any, schema: dict[str, Any], *, enforce_string_
         return _array_matches_schema(value, schema)
     if _schema_type_includes(expected_type, {"object"}) and isinstance(value, dict):
         if _is_bare_object_schema(schema):
-            return _value_matches_type(value, expected_type)
+            return True
+        if _is_bare_object_property_count_schema(schema):
+            return _object_property_count_matches(value, schema)
         return _object_matches_schema(value, schema)
 
     if not _value_matches_type(value, expected_type):
@@ -220,7 +226,27 @@ def _is_bare_object_schema(schema: dict[str, Any]) -> bool:
         and "properties" not in schema
         and "required" not in schema
         and "additionalProperties" not in schema
+        and "minProperties" not in schema
+        and "maxProperties" not in schema
     )
+
+
+def _is_bare_object_property_count_schema(schema: dict[str, Any]) -> bool:
+    return (
+        _schema_type_includes(schema.get("type"), {"object"})
+        and "properties" not in schema
+        and "required" not in schema
+        and "additionalProperties" not in schema
+        and ("minProperties" in schema or "maxProperties" in schema)
+    )
+
+
+def _object_property_count_matches(value: dict[str, Any], schema: dict[str, Any]) -> bool:
+    if "minProperties" in schema and len(value) < schema["minProperties"]:
+        return False
+    if "maxProperties" in schema and len(value) > schema["maxProperties"]:
+        return False
+    return True
 
 
 def _schema_type_includes(expected_type: Any, type_names: set[str]) -> bool:

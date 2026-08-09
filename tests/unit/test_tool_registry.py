@@ -844,7 +844,151 @@ def test_tool_registry_allows_root_nullable_object_schema(arguments: object) -> 
     ]
 
 
-@pytest.mark.parametrize("arguments", [{}, {"source": 123}, {"source": "README.md", "extra": "x"}])
+@pytest.mark.parametrize("arguments", [{}, {"a": 1, "b": 2, "c": 3}])
+def test_tool_registry_denies_object_property_count_violations_before_handler_runs(
+    arguments: dict[str, int],
+) -> None:
+    calls: list[dict[str, int]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="collect_options",
+            risk="read_only",
+            description="Collect a bounded set of options.",
+            parameters={
+                "type": "object",
+                "minProperties": 1,
+                "maxProperties": 2,
+                "additionalProperties": True,
+            },
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("collect_options", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "collect_options",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize("arguments", [{"a": 1}, {"a": 1, "b": 2}])
+def test_tool_registry_allows_bare_object_property_counts_within_schema_bounds(
+    arguments: dict[str, int],
+) -> None:
+    calls: list[dict[str, int]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="collect_options",
+            risk="read_only",
+            description="Collect a bounded set of options.",
+            parameters={"type": "object", "minProperties": 1, "maxProperties": 2},
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+
+    result = registry.execute("collect_options", arguments)
+
+    assert result is None
+    assert calls == [arguments]
+    assert registry.calls == [
+        {"tool": "collect_options", "arguments": arguments, "status": "completed"}
+    ]
+
+
+def test_tool_registry_allows_nested_object_property_counts() -> None:
+    calls: list[dict[str, dict[str, int]]] = []
+    arguments = {"options": {"a": 1, "b": 2}}
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="collect_nested_options",
+            risk="read_only",
+            description="Collect a bounded nested set of options.",
+            parameters={
+                "type": "object",
+                "required": ["options"],
+                "properties": {
+                    "options": {
+                        "type": "object",
+                        "minProperties": 1,
+                        "maxProperties": 2,
+                        "additionalProperties": {"type": "integer"},
+                    }
+                },
+                "additionalProperties": False,
+            },
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+
+    result = registry.execute("collect_nested_options", arguments)
+
+    assert result is None
+    assert calls == [arguments]
+    assert registry.calls == [
+        {
+            "tool": "collect_nested_options",
+            "arguments": arguments,
+            "status": "completed",
+        }
+    ]
+
+
+@pytest.mark.parametrize("options", [{}, {"a": 1, "b": 2, "c": 3}])
+def test_tool_registry_denies_nested_object_property_count_violations(
+    options: dict[str, int],
+) -> None:
+    calls: list[dict[str, dict[str, int]]] = []
+    arguments = {"options": options}
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="collect_nested_options",
+            risk="read_only",
+            description="Collect a bounded nested set of options.",
+            parameters={
+                "type": "object",
+                "required": ["options"],
+                "properties": {
+                    "options": {
+                        "type": "object",
+                        "minProperties": 1,
+                        "maxProperties": 2,
+                        "additionalProperties": {"type": "integer"},
+                    }
+                },
+                "additionalProperties": False,
+            },
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("collect_nested_options", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "collect_nested_options",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "arguments", [{}, {"source": 123}, {"source": "README.md", "extra": "x"}]
+)
 def test_tool_registry_denies_root_nullable_object_schema_violations_before_handler_runs(
     arguments: object,
 ) -> None:
