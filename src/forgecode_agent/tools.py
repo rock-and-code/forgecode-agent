@@ -97,6 +97,10 @@ def _arguments_match_schema(schema: dict[str, Any], arguments: Any) -> bool:
     if schema.get("type") == "array":
         if not isinstance(arguments, list):
             return False
+        if "minItems" in schema and len(arguments) < schema["minItems"]:
+            return False
+        if "maxItems" in schema and len(arguments) > schema["maxItems"]:
+            return False
         item_type = schema.get("items", {}).get("type")
         return all(_value_matches_type(value, item_type) for value in arguments)
 
