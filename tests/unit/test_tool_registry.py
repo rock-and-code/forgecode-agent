@@ -208,6 +208,79 @@ def test_tool_registry_denies_object_argument_type_mismatch_before_handler_runs(
     ]
 
 
+def test_tool_registry_allows_bare_nested_object_properties() -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="annotate",
+            risk="read_only",
+            description="Annotate with arbitrary metadata.",
+            parameters={
+                "type": "object",
+                "required": ["metadata"],
+                "properties": {"metadata": {"type": "object"}},
+            },
+            handler=lambda metadata: calls.append({"metadata": metadata}),
+        )
+    )
+    arguments = {"metadata": {"any": "value", "nested": {"ok": True}}}
+
+    result = registry.execute("annotate", arguments)
+
+    assert result is None
+    assert calls == [{"metadata": arguments["metadata"]}]
+    assert registry.calls == [{"tool": "annotate", "arguments": arguments, "status": "completed"}]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"metadata": {"source": 123}},
+        {"metadata": {}},
+        {"metadata": {"source": "fixture", "extra": "not allowed"}},
+    ],
+)
+def test_tool_registry_denies_nested_object_schema_violations_before_handler_runs(
+    arguments: dict[str, object],
+) -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="annotate",
+            risk="read_only",
+            description="Annotate with metadata.",
+            parameters={
+                "type": "object",
+                "required": ["metadata"],
+                "properties": {
+                    "metadata": {
+                        "type": "object",
+                        "required": ["source"],
+                        "properties": {"source": {"type": "string"}},
+                        "additionalProperties": False,
+                    }
+                },
+            },
+            handler=lambda metadata: calls.append({"metadata": metadata}),
+        )
+    )
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("annotate", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "annotate",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
 @pytest.mark.parametrize("arguments", [None, ["README.md"], "README.md"])
 def test_tool_registry_denies_non_dict_arguments_before_handler_runs(
     read_file_tool: ToolDefinition,
@@ -440,6 +513,37 @@ def test_tool_registry_executes_array_schema_with_list_as_single_positional_argu
     assert calls == [arguments]
     assert registry.calls == [
         {"tool": "batch_read", "arguments": arguments, "status": "completed"}
+    ]
+
+
+def test_tool_registry_preserves_array_item_type_only_validation() -> None:
+    calls: list[list[str]] = []
+
+    def handler(modes: list[str]) -> dict[str, int]:
+        calls.append(modes)
+        return {"count": len(modes)}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="set_modes",
+            risk="read_only",
+            description="Set modes.",
+            parameters={
+                "type": "array",
+                "items": {"type": "string", "enum": ["fast"], "minLength": 5},
+            },
+            handler=handler,
+        )
+    )
+    arguments = ["safe"]
+
+    result = registry.execute("set_modes", arguments)
+
+    assert result == {"count": 1}
+    assert calls == [arguments]
+    assert registry.calls == [
+        {"tool": "set_modes", "arguments": arguments, "status": "completed"}
     ]
 
 

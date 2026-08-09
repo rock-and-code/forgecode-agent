@@ -95,49 +95,66 @@ class ToolRegistry:
 
 def _arguments_match_schema(schema: dict[str, Any], arguments: Any) -> bool:
     if schema.get("type") == "array":
-        if not isinstance(arguments, list):
-            return False
-        if "minItems" in schema and len(arguments) < schema["minItems"]:
-            return False
-        if "maxItems" in schema and len(arguments) > schema["maxItems"]:
-            return False
-        item_type = schema.get("items", {}).get("type")
-        return all(_value_matches_type(value, item_type) for value in arguments)
+        return _array_matches_schema(arguments, schema)
+    return _object_matches_schema(arguments, schema)
 
-    if not isinstance(arguments, dict):
+
+def _array_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
+    if not isinstance(value, list):
+        return False
+    if "minItems" in schema and len(value) < schema["minItems"]:
+        return False
+    if "maxItems" in schema and len(value) > schema["maxItems"]:
+        return False
+    item_type = schema.get("items", {}).get("type")
+    return all(_value_matches_type(item, item_type) for item in value)
+
+
+def _object_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
+    if not isinstance(value, dict):
         return False
 
     for required_name in schema.get("required", []):
-        if required_name not in arguments:
+        if required_name not in value:
             return False
 
     properties = schema.get("properties", {})
     if schema.get("additionalProperties") is not True:
-        for name in arguments:
+        for name in value:
             if name not in properties:
                 return False
 
-    for name, value in arguments.items():
-        property_schema = properties.get(name, {})
-        expected_type = property_schema.get("type")
-        if not _value_matches_type(value, expected_type):
-            return False
-        if "enum" in property_schema and value not in property_schema["enum"]:
-            return False
-        if (
-            expected_type == "string"
-            and "minLength" in property_schema
-            and len(value) < property_schema["minLength"]
-        ):
-            return False
-        if (
-            expected_type == "string"
-            and "maxLength" in property_schema
-            and len(value) > property_schema["maxLength"]
-        ):
-            return False
+    return all(_value_matches_schema(item, properties.get(name, {})) for name, item in value.items())
+
+
+def _value_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
+    expected_type = schema.get("type")
+    if expected_type == "array":
+        return _array_matches_schema(value, schema)
+    if expected_type == "object":
+        if _is_bare_object_schema(schema):
+            return _value_matches_type(value, expected_type)
+        return _object_matches_schema(value, schema)
+
+    if not _value_matches_type(value, expected_type):
+        return False
+    if "enum" in schema and value not in schema["enum"]:
+        return False
+    if expected_type == "string" and "minLength" in schema and len(value) < schema["minLength"]:
+        return False
+    if expected_type == "string" and "maxLength" in schema and len(value) > schema["maxLength"]:
+        return False
 
     return True
+
+
+def _is_bare_object_schema(schema: dict[str, Any]) -> bool:
+    return (
+        schema.get("type") == "object"
+        and "properties" not in schema
+        and "required" not in schema
+        and "additionalProperties" not in schema
+    )
 
 
 def _value_matches_type(value: Any, expected_type: Any) -> bool:
