@@ -1225,7 +1225,7 @@ def test_tool_registry_allows_object_property_string_unanchored_pattern_search_m
     ]
 
 
-def test_tool_registry_ignores_top_level_array_item_string_pattern_for_this_slice() -> None:
+def test_tool_registry_denies_array_item_string_pattern_mismatch_before_handler_runs() -> None:
     calls: list[list[str]] = []
 
     def handler(paths: list[str]) -> dict[str, int]:
@@ -1240,17 +1240,53 @@ def test_tool_registry_ignores_top_level_array_item_string_pattern_for_this_slic
             description="Read multiple paths.",
             parameters={
                 "type": "array",
-                "items": {"type": "string", "pattern": r"^safe-"},
+                "items": {"type": "string", "pattern": r"^[A-Za-z0-9_./-]+$"},
             },
             handler=handler,
         )
     )
-    arguments = ["unsafe"]
+    arguments = ["README.md", "unsafe path;rm"]
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("batch_read", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "batch_read",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_allows_array_item_string_pattern_match() -> None:
+    calls: list[list[str]] = []
+
+    def handler(paths: list[str]) -> dict[str, int]:
+        calls.append(paths)
+        return {"count": len(paths)}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_read",
+            risk="read_only",
+            description="Read multiple paths.",
+            parameters={
+                "type": "array",
+                "items": {"type": "string", "pattern": r"^[A-Za-z0-9_./-]+$"},
+            },
+            handler=handler,
+        )
+    )
+    arguments = ["README.md", "src/forgecode_agent/tools.py"]
 
     result = registry.execute("batch_read", arguments)
 
-    assert result == {"count": 1}
-    assert calls == [["unsafe"]]
+    assert result == {"count": 2}
+    assert calls == [arguments]
     assert registry.calls == [
         {"tool": "batch_read", "arguments": arguments, "status": "completed"}
     ]
