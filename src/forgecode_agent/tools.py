@@ -46,7 +46,10 @@ class ToolRegistry:
                 detail = "requires approval" if decision.requires_approval else decision.reason
                 raise ToolCallDenied(f"Tool call denied: {name} {detail}", reason=decision.reason)
 
-        result = tool.handler(**arguments)
+        if tool.parameters.get("type") == "array":
+            result = tool.handler(arguments)
+        else:
+            result = tool.handler(**arguments)
         self.calls.append({"tool": name, "arguments": arguments, "status": "completed"})
         return result
 
@@ -71,6 +74,9 @@ class ToolRegistry:
 
 
 def _arguments_match_schema(schema: dict[str, Any], arguments: Any) -> bool:
+    if schema.get("type") == "array":
+        return isinstance(arguments, list)
+
     if not isinstance(arguments, dict):
         return False
 
