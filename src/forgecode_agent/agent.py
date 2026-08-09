@@ -39,18 +39,6 @@ class AgentController:
             response = self.model_provider.complete(messages=messages)
             self.ledger.append("model_responded", self._message_data(response))
 
-            if len(response.tool_intents) > 1:
-                self.ledger.append(
-                    "run_completed",
-                    {"final_answer": response.content, "completed": False, "stop_reason": "multiple_tool_calls"},
-                )
-                return AgentRunResult(
-                    final_answer=response.content,
-                    completed=False,
-                    iterations=iterations,
-                    stop_reason="multiple_tool_calls",
-                )
-
             if not response.tool_intents:
                 self.ledger.append("run_completed", {"final_answer": response.content, "completed": True})
                 return AgentRunResult(final_answer=response.content, completed=True, iterations=iterations)
@@ -65,6 +53,18 @@ class AgentController:
                     completed=False,
                     iterations=iterations,
                     stop_reason="max_iterations",
+                )
+
+            if len(response.tool_intents) > 1:
+                self.ledger.append(
+                    "run_completed",
+                    {"final_answer": response.content, "completed": False, "stop_reason": "multiple_tool_calls"},
+                )
+                return AgentRunResult(
+                    final_answer=response.content,
+                    completed=False,
+                    iterations=iterations,
+                    stop_reason="multiple_tool_calls",
                 )
 
             intent = response.tool_intents[0]
