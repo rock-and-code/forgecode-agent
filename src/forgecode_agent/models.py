@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -23,7 +24,7 @@ class FakeModelProvider:
         self._cursor = 0
 
     def complete(self, *, messages: list[dict[str, Any]]) -> AssistantMessage:
-        self.requests.append({"messages": messages})
+        self.requests.append({"messages": deepcopy(messages)})
         if self._cursor >= len(self.script):
             raise IndexError("FakeModelProvider script exhausted")
         response = self.script[self._cursor]

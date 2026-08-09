@@ -36,3 +36,16 @@ def test_fake_model_provider_is_exhaustive_and_fails_when_script_is_consumed() -
 
     with pytest.raises(IndexError, match="FakeModelProvider script exhausted"):
         provider.complete(messages=[{"role": "user", "content": "unexpected extra turn"}])
+
+
+def test_fake_model_provider_records_defensive_copies_of_requests() -> None:
+    provider = FakeModelProvider(script=[AssistantMessage(content="ok")])
+    messages = [{"role": "user", "content": "first", "metadata": {"paths": ["README.md"]}}]
+
+    provider.complete(messages=messages)
+    messages[0]["content"] = "mutated"
+    messages[0]["metadata"]["paths"].append("pyproject.toml")
+
+    assert provider.requests == [
+        {"messages": [{"role": "user", "content": "first", "metadata": {"paths": ["README.md"]}}]}
+    ]
