@@ -81,6 +81,52 @@ def test_write_jsonl_redacts_default_secret_keys_recursively_without_mutating_ev
     assert ledger.events[0].data == sensitive_payload
 
 
+def test_write_jsonl_redacts_secret_looking_string_values_without_mutating_events(tmp_path) -> None:
+    ledger = RunLedger(run_id="value-redaction-test")
+    payload = {
+        "headers": {"scheme": "Bearer abcdef"},
+        "metadata": ["visible", "Bearer token123", {"public_key_value": "sk-abcdef"}],
+        "tuple_values": ("sk-123456", "Bearer short", "sk-short"),
+        "safe": "Bearer abcde",
+        "also_safe": "prefix sk-abcdef",
+    }
+    ledger.append("tool_call_requested", payload)
+
+    ledger.write_jsonl(tmp_path / "run.jsonl")
+
+    row = json.loads((tmp_path / "run.jsonl").read_text(encoding="utf-8"))
+    assert row["data"] == {
+        "headers": {"scheme": "[REDACTED]"},
+        "metadata": ["visible", "[REDACTED]", {"public_key_value": "[REDACTED]"}],
+        "tuple_values": ["[REDACTED]", "Bearer short", "sk-short"],
+        "safe": "Bearer abcde",
+        "also_safe": "prefix sk-abcdef",
+    }
+    assert ledger.events[0].data == payload
+
+
+def test_write_jsonl_redacts_bearer_scheme_case_insensitively(tmp_path) -> None:
+    ledger = RunLedger(run_id="bearer-case-redaction-test")
+    payload = {
+        "lowercase_bearer": "bearer abcdef",
+        "uppercase_bearer": "BEARER abcdef",
+        "short_lowercase_bearer": "bearer abcde",
+        "uppercase_sk_is_not_redacted": "SK-abcdef",
+    }
+    ledger.append("tool_call_requested", payload)
+
+    ledger.write_jsonl(tmp_path / "run.jsonl")
+
+    row = json.loads((tmp_path / "run.jsonl").read_text(encoding="utf-8"))
+    assert row["data"] == {
+        "lowercase_bearer": "[REDACTED]",
+        "uppercase_bearer": "[REDACTED]",
+        "short_lowercase_bearer": "bearer abcde",
+        "uppercase_sk_is_not_redacted": "SK-abcdef",
+    }
+    assert ledger.events[0].data == payload
+
+
 def test_write_jsonl_uses_custom_redact_keys_additively_with_defaults(tmp_path) -> None:
     ledger = RunLedger(run_id="custom-redaction-test")
     ledger.append(

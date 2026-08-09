@@ -22,6 +22,19 @@ DEFAULT_REDACT_KEYS = {
 REDACTED_VALUE = "[REDACTED]"
 
 
+def _looks_like_secret_string(value: str) -> bool:
+    bearer_prefix = "Bearer "
+    if value.lower().startswith(bearer_prefix.lower()):
+        candidate = value[len(bearer_prefix) : len(bearer_prefix) + 6]
+        return len(candidate) == 6 and all(not char.isspace() for char in candidate)
+
+    sk_prefix = "sk-"
+    if value.startswith(sk_prefix):
+        candidate = value[len(sk_prefix) : len(sk_prefix) + 6]
+        return len(candidate) == 6 and all(not char.isspace() for char in candidate)
+    return False
+
+
 def _redact(value: Any, redact_keys: Iterable[str]) -> Any:
     key_fragments = tuple(fragment.lower() for fragment in redact_keys)
     if isinstance(value, dict):
@@ -33,6 +46,8 @@ def _redact(value: Any, redact_keys: Iterable[str]) -> Any:
         return [_redact(item, key_fragments) for item in value]
     if isinstance(value, tuple):
         return tuple(_redact(item, key_fragments) for item in value)
+    if isinstance(value, str) and _looks_like_secret_string(value):
+        return REDACTED_VALUE
     return value
 
 
