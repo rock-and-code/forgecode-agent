@@ -84,6 +84,8 @@ class RunLedger:
 
         required_keys = {"type", "data", "timestamp", "run_id"}
         for index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                raise ValueError(f"JSONL ledger row {index} must be an object")
             missing_keys = required_keys - row.keys()
             if missing_keys:
                 missing = ", ".join(sorted(missing_keys))

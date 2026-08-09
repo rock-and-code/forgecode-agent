@@ -119,6 +119,15 @@ def test_read_jsonl_rejects_rows_missing_required_keys(tmp_path, missing_key: st
         RunLedger.read_jsonl(output_path)
 
 
+@pytest.mark.parametrize("row", [["not", "object"], "not-object", 42])
+def test_read_jsonl_rejects_non_object_rows(tmp_path, row: object) -> None:
+    output_path = tmp_path / "non-object.jsonl"
+    output_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="(?i)(object|row|jsonl)"):
+        RunLedger.read_jsonl(output_path)
+
+
 def test_write_jsonl_redacts_default_secret_keys_recursively_without_mutating_events(tmp_path) -> None:
     ledger = RunLedger(run_id="redaction-test")
     sensitive_payload = {
