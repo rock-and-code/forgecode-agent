@@ -96,6 +96,10 @@ class ToolRegistry:
 
 
 def _arguments_match_schema(schema: dict[str, Any], arguments: Any) -> bool:
+    if not _any_of_matches_schema(arguments, schema, enforce_string_pattern=True):
+        return False
+    if _is_any_of_only_schema(schema):
+        return True
     if "const" in schema and not _value_matches_const(arguments, schema["const"]):
         return False
     expected_type = schema.get("type")
@@ -104,6 +108,8 @@ def _arguments_match_schema(schema: dict[str, Any], arguments: Any) -> bool:
     if _schema_type_includes(expected_type, {"array"}) and isinstance(arguments, list):
         return _array_matches_schema(arguments, schema)
     if _schema_type_includes(expected_type, {"object"}) and isinstance(arguments, dict):
+        if "anyOf" in schema and _is_bare_object_schema(schema):
+            return True
         if _is_bare_object_property_count_schema(schema):
             return _object_property_count_matches(arguments, schema)
         return _object_matches_schema(arguments, schema)
@@ -170,6 +176,9 @@ def _object_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
 
 
 def _value_matches_schema(value: Any, schema: dict[str, Any], *, enforce_string_pattern: bool = False) -> bool:
+    if not _any_of_matches_schema(value, schema, enforce_string_pattern=enforce_string_pattern):
+        return False
+
     if "const" in schema and not _value_matches_const(value, schema["const"]):
         return False
 
@@ -232,6 +241,35 @@ def _value_matches_schema(value: Any, schema: dict[str, Any], *, enforce_string_
         return False
 
     return True
+
+
+def _any_of_matches_schema(
+    value: Any,
+    schema: dict[str, Any],
+    *,
+    enforce_string_pattern: bool = False,
+) -> bool:
+    if "anyOf" not in schema:
+        return True
+
+    subschemas = schema["anyOf"]
+    if not isinstance(subschemas, list) or len(subschemas) == 0:
+        return False
+    if any(not isinstance(subschema, dict) for subschema in subschemas):
+        return False
+
+    return any(
+        _value_matches_schema(
+            value,
+            subschema,
+            enforce_string_pattern=enforce_string_pattern,
+        )
+        for subschema in subschemas
+    )
+
+
+def _is_any_of_only_schema(schema: dict[str, Any]) -> bool:
+    return set(schema.keys()) == {"anyOf"}
 
 
 def _is_bare_object_schema(schema: dict[str, Any]) -> bool:

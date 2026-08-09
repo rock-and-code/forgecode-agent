@@ -352,6 +352,210 @@ def test_tool_registry_denies_nullable_union_argument_type_mismatch_before_handl
     ]
 
 
+@pytest.mark.parametrize("target", ["file:README.md", {"id": 123}])
+def test_tool_registry_allows_any_of_argument_alternatives(target: object) -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="resolve_target",
+            risk="read_only",
+            description="Resolve a target by path URI or object id.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "anyOf": [
+                            {"type": "string", "pattern": "^file:"},
+                            {
+                                "type": "object",
+                                "required": ["id"],
+                                "properties": {"id": {"type": "integer"}},
+                                "additionalProperties": False,
+                            },
+                        ]
+                    }
+                },
+                "required": ["target"],
+            },
+            handler=lambda target: calls.append({"target": target}),
+        )
+    )
+    arguments = {"target": target}
+
+    result = registry.execute("resolve_target", arguments)
+
+    assert result is None
+    assert calls == [{"target": target}]
+    assert registry.calls == [
+        {"tool": "resolve_target", "arguments": arguments, "status": "completed"}
+    ]
+
+
+@pytest.mark.parametrize("target", ["http://example", {"id": "abc"}])
+def test_tool_registry_denies_any_of_argument_alternative_mismatches_before_handler_runs(
+    target: object,
+) -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="resolve_target",
+            risk="read_only",
+            description="Resolve a target by path URI or object id.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "anyOf": [
+                            {"type": "string", "pattern": "^file:"},
+                            {
+                                "type": "object",
+                                "required": ["id"],
+                                "properties": {"id": {"type": "integer"}},
+                                "additionalProperties": False,
+                            },
+                        ]
+                    }
+                },
+                "required": ["target"],
+            },
+            handler=lambda target: calls.append({"target": target}),
+        )
+    )
+    arguments = {"target": target}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("resolve_target", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "resolve_target",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_allows_top_level_object_any_of_alternatives() -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="resolve_target",
+            risk="read_only",
+            description="Resolve a top-level target by path URI or id.",
+            parameters={
+                "type": "object",
+                "anyOf": [
+                    {
+                        "type": "object",
+                        "required": ["path"],
+                        "properties": {"path": {"type": "string", "pattern": "^file:"}},
+                    },
+                    {
+                        "type": "object",
+                        "required": ["id"],
+                        "properties": {"id": {"type": "integer"}},
+                    },
+                ],
+            },
+            handler=lambda **kwargs: calls.append(kwargs),
+        )
+    )
+
+    path_arguments = {"path": "file:README.md"}
+    assert registry.execute("resolve_target", path_arguments) is None
+
+    id_arguments = {"id": 7}
+    assert registry.execute("resolve_target", id_arguments) is None
+
+    invalid_arguments = {"path": "http://x"}
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("resolve_target", invalid_arguments)
+
+    assert calls == [path_arguments, id_arguments]
+    assert registry.calls == [
+        {"tool": "resolve_target", "arguments": path_arguments, "status": "completed"},
+        {"tool": "resolve_target", "arguments": id_arguments, "status": "completed"},
+        {
+            "tool": "resolve_target",
+            "arguments": invalid_arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        },
+    ]
+
+
+@pytest.mark.parametrize("any_of", [[], {"type": "string"}])
+def test_tool_registry_denies_malformed_any_of_schema_before_handler_runs(any_of: object) -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="resolve_target",
+            risk="read_only",
+            description="Resolve a target by path URI or object id.",
+            parameters={
+                "type": "object",
+                "properties": {"target": {"anyOf": any_of}},
+                "required": ["target"],
+            },
+            handler=lambda target: calls.append({"target": target}),
+        )
+    )
+    arguments = {"target": "file:README.md"}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("resolve_target", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "resolve_target",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+def test_tool_registry_denies_malformed_any_of_member_before_handler_runs() -> None:
+    calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="resolve_target",
+            risk="read_only",
+            description="Resolve a target by path URI or object id.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"anyOf": ["not-a-schema", {"type": "string"}]}
+                },
+                "required": ["target"],
+            },
+            handler=lambda target: calls.append({"target": target}),
+        )
+    )
+    arguments = {"target": "file:README.md"}
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("resolve_target", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "resolve_target",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
 @pytest.mark.parametrize("paths", [None, ["README.md", "pyproject.toml"]])
 def test_tool_registry_applies_nullable_array_schema_constraints(paths: object) -> None:
     calls: list[dict[str, object]] = []
