@@ -76,12 +76,17 @@ def doctor_status(workspace: Path) -> DoctorStatus:
     messages: list[str] = []
     config_file = workspace / ".forge" / "config.toml"
     provider = os.environ.get("FORGECODE_MODEL_PROVIDER")
+    if not provider and config_file.is_file():
+        try:
+            provider = _read_simple_toml_strings(config_file).get("model_provider")
+        except (OSError, UnicodeDecodeError):
+            provider = None
     api_key = os.environ.get("FORGECODE_API_KEY")
 
     checks = {
         "python": "ok",
         "workspace": "ok" if workspace.exists() and workspace.is_dir() else "missing",
-        "config_file": "ok" if config_file.exists() else "missing",
+        "config_file": "ok" if config_file.is_file() else "missing",
         "model_provider": f"ok: {provider}" if provider else "missing",
         "credentials": "ok" if api_key else "missing",
     }
@@ -90,9 +95,9 @@ def doctor_status(workspace: Path) -> DoctorStatus:
         messages.append("Workspace does not exist or is not a directory.")
     if checks["config_file"] != "ok":
         messages.append("No ForgeCode config file found in workspace.")
-    if provider is None:
+    if not provider:
         messages.append("FORGECODE_MODEL_PROVIDER is not set.")
-    if api_key is None:
+    if not api_key:
         messages.append("FORGECODE_API_KEY is not set.")
 
     return DoctorStatus(ok=not messages, workspace=workspace, checks=checks, messages=messages)
