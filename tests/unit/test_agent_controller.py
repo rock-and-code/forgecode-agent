@@ -51,6 +51,125 @@ def test_agent_controller_runs_one_iteration_records_events_and_returns_final_an
     }
 
 
+def test_agent_controller_exhausts_budget_when_second_model_response_requests_another_tool(
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    ledger = RunLedger(run_id="second-tool-after-budget")
+    provider = FakeModelProvider(
+        script=[
+            AssistantMessage(
+                content="I need to inspect README.md first.",
+                tool_intents=[ToolIntent(name="read_file", arguments={"path": "README.md"})],
+            ),
+            AssistantMessage(
+                content="Now I need pyproject.toml too.",
+                tool_intents=[ToolIntent(name="read_file", arguments={"path": "pyproject.toml"})],
+            ),
+            AssistantMessage(content="This response must not be requested."),
+        ]
+    )
+    registry = read_only_registry.clone_empty_history()
+    controller = AgentController(
+        model_provider=provider,
+        tools=registry,
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+        max_iterations=1,
+    )
+
+    result = controller.run(goal="Read README.md and pyproject.toml")
+
+    assert result.final_answer == "Now I need pyproject.toml too."
+    assert result.completed is False
+    assert result.iterations == 1
+    assert result.stop_reason == "max_iterations"
+    assert len(provider.requests) == 2
+    assert registry.calls == [{"tool": "read_file", "arguments": {"path": "README.md"}, "status": "completed"}]
+    assert [event.type for event in ledger.events] == [
+        "run_started",
+        "model_requested",
+        "model_responded",
+        "tool_call_requested",
+        "policy_decision",
+        "tool_call_completed",
+        "model_requested",
+        "model_responded",
+        "run_completed",
+    ]
+    assert ledger.events[-2].data == {
+        "content": "Now I need pyproject.toml too.",
+        "tool_intents": [{"name": "read_file", "arguments": {"path": "pyproject.toml"}}],
+    }
+    assert ledger.events[-1].data == {
+        "final_answer": "Now I need pyproject.toml too.",
+        "completed": False,
+        "stop_reason": "max_iterations",
+    }
+
+
+def test_agent_controller_executes_second_tool_request_when_budget_remains(
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    ledger = RunLedger(run_id="second-tool-within-budget")
+    provider = FakeModelProvider(
+        script=[
+            AssistantMessage(
+                content="I need to inspect README.md first.",
+                tool_intents=[ToolIntent(name="read_file", arguments={"path": "README.md"})],
+            ),
+            AssistantMessage(
+                content="Now I need pyproject.toml too.",
+                tool_intents=[ToolIntent(name="read_file", arguments={"path": "pyproject.toml"})],
+            ),
+            AssistantMessage(content="README.md and pyproject.toml have both been read."),
+        ]
+    )
+    registry = read_only_registry.clone_empty_history()
+    controller = AgentController(
+        model_provider=provider,
+        tools=registry,
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+        max_iterations=2,
+    )
+
+    result = controller.run(goal="Read README.md and pyproject.toml")
+
+    assert result.final_answer == "README.md and pyproject.toml have both been read."
+    assert result.completed is True
+    assert result.iterations == 2
+    assert result.stop_reason is None
+    assert len(provider.requests) == 3
+    assert registry.calls == [
+        {"tool": "read_file", "arguments": {"path": "README.md"}, "status": "completed"},
+        {"tool": "read_file", "arguments": {"path": "pyproject.toml"}, "status": "completed"},
+    ]
+    assert [event.type for event in ledger.events] == [
+        "run_started",
+        "model_requested",
+        "model_responded",
+        "tool_call_requested",
+        "policy_decision",
+        "tool_call_completed",
+        "model_requested",
+        "model_responded",
+        "tool_call_requested",
+        "policy_decision",
+        "tool_call_completed",
+        "model_requested",
+        "model_responded",
+        "run_completed",
+    ]
+    assert ledger.events[3].data == {"tool": "read_file", "arguments": {"path": "README.md"}}
+    assert ledger.events[8].data == {"tool": "read_file", "arguments": {"path": "pyproject.toml"}}
+    assert ledger.events[-1].data == {
+        "final_answer": "README.md and pyproject.toml have both been read.",
+        "completed": True,
+    }
+
+
 def test_agent_controller_is_deterministic_for_same_script(
     read_only_registry: ToolRegistry,
     auto_read_policy: ApprovalPolicy,
