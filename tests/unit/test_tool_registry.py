@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 
 from forgecode_agent.policy import ApprovalPolicy, ApprovalMode
-from forgecode_agent.tools import ToolCallDenied, ToolDefinition, ToolRegistry
+from forgecode_agent.tools import (
+    ToolCallDenied,
+    ToolDefinition,
+    ToolExecutionError,
+    ToolRegistry,
+)
 
 
 def test_tool_registry_executes_only_registered_tools(read_file_tool: ToolDefinition) -> None:
@@ -256,6 +261,45 @@ def test_tool_registry_executes_array_schema_with_list_as_single_positional_argu
     assert registry.calls == [
         {"tool": "batch_read", "arguments": arguments, "status": "completed"}
     ]
+
+
+def test_tool_registry_wraps_handler_failures_without_leaking_raw_message() -> None:
+    def handler(path: str) -> dict[str, str]:
+        raise RuntimeError("password=supersecret disk read failed")
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="read_file",
+            risk="read_only",
+            description="Read a UTF-8 text file from the workspace.",
+            parameters={
+                "type": "object",
+                "required": ["path"],
+                "properties": {"path": {"type": "string"}},
+            },
+            handler=handler,
+        )
+    )
+    arguments = {"path": "README.md"}
+
+    with pytest.raises(ToolExecutionError) as exc_info:
+        registry.execute("read_file", arguments)
+
+    assert exc_info.value.tool_name == "read_file"
+    assert exc_info.value.error_type == "RuntimeError"
+    assert str(exc_info.value) == "tool execution failed"
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert registry.calls == [
+        {
+            "tool": "read_file",
+            "arguments": arguments,
+            "status": "failed",
+            "reason": "tool_error",
+            "error_type": "RuntimeError",
+        }
+    ]
+    assert "supersecret" not in repr(registry.calls)
 
 
 def test_tool_registry_denies_unknown_extra_arguments_before_handler_runs(

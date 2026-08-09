@@ -6,7 +6,7 @@ from typing import Any
 from forgecode_agent.ledger import RunLedger
 from forgecode_agent.models import AssistantMessage
 from forgecode_agent.policy import ApprovalPolicy
-from forgecode_agent.tools import ToolCallDenied, ToolRegistry
+from forgecode_agent.tools import ToolCallDenied, ToolExecutionError, ToolRegistry
 
 
 @dataclass(frozen=True)
@@ -106,6 +106,8 @@ class AgentController:
                 if exc.reason != "invalid_arguments":
                     raise
                 return self._invalid_tool_arguments_result(response, iterations)
+            except ToolExecutionError as exc:
+                return self._tool_error_result(response, iterations, exc)
             self.ledger.append("tool_call_completed", {"tool": intent.name, "result": result})
 
             messages.extend(
@@ -149,6 +151,32 @@ class AgentController:
             completed=False,
             iterations=iterations,
             stop_reason="invalid_tool_arguments",
+        )
+
+    def _tool_error_result(
+        self,
+        message: AssistantMessage,
+        iterations: int,
+        error: ToolExecutionError,
+    ) -> AgentRunResult:
+        self.ledger.append(
+            "tool_call_failed",
+            {
+                "tool": error.tool_name,
+                "reason": "tool_error",
+                "error": str(error),
+                "error_type": error.error_type,
+            },
+        )
+        self.ledger.append(
+            "run_completed",
+            {"final_answer": message.content, "completed": False, "stop_reason": "tool_error"},
+        )
+        return AgentRunResult(
+            final_answer=message.content,
+            completed=False,
+            iterations=iterations,
+            stop_reason="tool_error",
         )
 
     @staticmethod

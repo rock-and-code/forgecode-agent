@@ -12,6 +12,13 @@ class ToolCallDenied(RuntimeError):
         self.reason = reason
 
 
+class ToolExecutionError(RuntimeError):
+    def __init__(self, tool_name: str, error_type: str) -> None:
+        super().__init__("tool execution failed")
+        self.tool_name = tool_name
+        self.error_type = error_type
+
+
 @dataclass(frozen=True)
 class ToolDefinition:
     name: str
@@ -46,10 +53,23 @@ class ToolRegistry:
                 detail = "requires approval" if decision.requires_approval else decision.reason
                 raise ToolCallDenied(f"Tool call denied: {name} {detail}", reason=decision.reason)
 
-        if tool.parameters.get("type") == "array":
-            result = tool.handler(arguments)
-        else:
-            result = tool.handler(**arguments)
+        try:
+            if tool.parameters.get("type") == "array":
+                result = tool.handler(arguments)
+            else:
+                result = tool.handler(**arguments)
+        except Exception as exc:
+            error_type = type(exc).__name__
+            self.calls.append(
+                {
+                    "tool": name,
+                    "arguments": arguments,
+                    "status": "failed",
+                    "reason": "tool_error",
+                    "error_type": error_type,
+                }
+            )
+            raise ToolExecutionError(name, error_type) from exc
         self.calls.append({"tool": name, "arguments": arguments, "status": "completed"})
         return result
 

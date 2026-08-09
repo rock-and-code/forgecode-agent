@@ -615,3 +615,85 @@ def test_agent_controller_stops_safely_when_tool_arguments_are_malformed(
         "completed": False,
         "stop_reason": "invalid_tool_arguments",
     }
+
+
+def test_agent_controller_stops_safely_when_tool_handler_raises_runtime_exception(
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    def failing_read_file(path: str) -> dict[str, str]:
+        raise RuntimeError("password=supersecret disk read failed")
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="read_file",
+            risk="read_only",
+            description="Read a UTF-8 text file from the workspace.",
+            parameters={
+                "type": "object",
+                "required": ["path"],
+                "properties": {"path": {"type": "string"}},
+            },
+            handler=failing_read_file,
+        )
+    )
+    ledger = RunLedger(run_id="tool-handler-runtime-error")
+    provider = FakeModelProvider(
+        script=[
+            AssistantMessage(
+                content="I need to inspect the README first.",
+                tool_intents=[ToolIntent(name="read_file", arguments={"path": "README.md"})],
+            ),
+            AssistantMessage(content="This response must not be requested."),
+        ]
+    )
+    controller = AgentController(
+        model_provider=provider,
+        tools=registry,
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+        max_iterations=1,
+    )
+
+    result = controller.run(goal="Read README.md")
+
+    assert result.final_answer == "I need to inspect the README first."
+    assert result.completed is False
+    assert result.iterations == 1
+    assert result.stop_reason == "tool_error"
+    assert len(provider.requests) == 1
+    assert registry.calls == [
+        {
+            "tool": "read_file",
+            "arguments": {"path": "README.md"},
+            "status": "failed",
+            "reason": "tool_error",
+            "error_type": "RuntimeError",
+        }
+    ]
+    assert [event.type for event in ledger.events] == [
+        "run_started",
+        "model_requested",
+        "model_responded",
+        "tool_call_requested",
+        "policy_decision",
+        "tool_call_failed",
+        "run_completed",
+    ]
+    assert ledger.events[4].data == {
+        "tool": "read_file",
+        "allowed": True,
+        "reason": "auto_allowed_read_only",
+    }
+    assert ledger.events[5].data == {
+        "tool": "read_file",
+        "reason": "tool_error",
+        "error": "tool execution failed",
+        "error_type": "RuntimeError",
+    }
+    assert "supersecret" not in json.dumps(ledger.events[5].data)
+    assert ledger.events[-1].data == {
+        "final_answer": "I need to inspect the README first.",
+        "completed": False,
+        "stop_reason": "tool_error",
+    }
