@@ -106,8 +106,8 @@ def _array_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
         return False
     if "maxItems" in schema and len(value) > schema["maxItems"]:
         return False
-    item_type = schema.get("items", {}).get("type")
-    return all(_value_matches_type(item, item_type) for item in value)
+    item_schema = schema.get("items", {})
+    return all(_value_matches_schema(item, item_schema) for item in value)
 
 
 def _object_matches_schema(value: Any, schema: dict[str, Any]) -> bool:

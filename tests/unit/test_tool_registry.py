@@ -635,6 +635,57 @@ def test_tool_registry_denies_boolean_array_item_type_mismatch_before_handler_ru
 @pytest.mark.parametrize(
     "arguments",
     [
+        [{"path": "README.md", "extra": "x"}],
+        [{"path": ""}],
+        [{}],
+        [{"path": 123}],
+    ],
+)
+def test_tool_registry_denies_array_items_that_do_not_match_full_item_schema_before_handler_runs(
+    arguments: list[dict[str, object]],
+) -> None:
+    calls: list[list[dict[str, object]]] = []
+
+    def handler(paths: list[dict[str, object]]) -> dict[str, int]:
+        calls.append(paths)
+        return {"count": len(paths)}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_read",
+            risk="read_only",
+            description="Read multiple files.",
+            parameters={
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["path"],
+                    "properties": {"path": {"type": "string", "minLength": 1}},
+                    "additionalProperties": False,
+                },
+            },
+            handler=handler,
+        )
+    )
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("batch_read", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "batch_read",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
         ["README.md"],
         ["README.md", "pyproject.toml", "src/forgecode_agent/tools.py"],
     ],
@@ -721,7 +772,7 @@ def test_tool_registry_preserves_array_item_type_only_validation() -> None:
             description="Set modes.",
             parameters={
                 "type": "array",
-                "items": {"type": "string", "enum": ["fast"], "minLength": 5},
+                "items": {"type": "string"},
             },
             handler=handler,
         )
