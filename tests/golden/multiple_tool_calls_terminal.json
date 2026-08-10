@@ -1,0 +1,47 @@
+[
+  {
+    "data": {
+      "goal": "Read README.md and pyproject.toml"
+    },
+    "type": "run_started"
+  },
+  {
+    "data": {
+      "messages": [
+        {
+          "content": "Read README.md and pyproject.toml",
+          "role": "user"
+        }
+      ]
+    },
+    "type": "model_requested"
+  },
+  {
+    "data": {
+      "content": "I need two tools.",
+      "tool_intents": [
+        {
+          "arguments": {
+            "path": "README.md"
+          },
+          "name": "read_file"
+        },
+        {
+          "arguments": {
+            "path": "pyproject.toml"
+          },
+          "name": "read_file"
+        }
+      ]
+    },
+    "type": "model_responded"
+  },
+  {
+    "data": {
+      "completed": false,
+      "final_answer": "I need two tools.",
+      "stop_reason": "multiple_tool_calls"
+    },
+    "type": "run_completed"
+  }
+]
