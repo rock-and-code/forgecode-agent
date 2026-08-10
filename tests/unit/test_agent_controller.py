@@ -234,6 +234,37 @@ def test_agent_controller_read_loop_matches_golden_transcript(
     assert actual_transcript == golden_transcript
 
 
+def test_agent_controller_max_iterations_zero_tool_request_matches_golden_transcript(
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    ledger = RunLedger(run_id="max-iterations-zero-golden")
+    provider = FakeModelProvider(
+        script=[
+            AssistantMessage(
+                content="I need a tool.",
+                tool_intents=[ToolIntent(name="read_file", arguments={"path": "README.md"})],
+            )
+        ]
+    )
+    controller = AgentController(
+        model_provider=provider,
+        tools=read_only_registry.clone_empty_history(),
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+        max_iterations=0,
+    )
+
+    controller.run(goal="Read README.md")
+
+    actual_transcript = [event.to_dict(exclude={"timestamp"}) for event in ledger.events]
+    golden_transcript = json.loads(
+        (GOLDEN_DIR / "max_iterations_zero_tool_request.json").read_text(encoding="utf-8")
+    )
+    assert actual_transcript == golden_transcript
+    assert "tool_call_requested" not in [event["type"] for event in actual_transcript]
+
+
 def test_agent_controller_stops_before_tool_execution_when_max_iterations_is_zero(
     read_only_registry: ToolRegistry,
     auto_read_policy: ApprovalPolicy,

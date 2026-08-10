@@ -1,0 +1,41 @@
+[
+  {
+    "data": {
+      "goal": "Read README.md"
+    },
+    "type": "run_started"
+  },
+  {
+    "data": {
+      "messages": [
+        {
+          "content": "Read README.md",
+          "role": "user"
+        }
+      ]
+    },
+    "type": "model_requested"
+  },
+  {
+    "data": {
+      "content": "I need a tool.",
+      "tool_intents": [
+        {
+          "arguments": {
+            "path": "README.md"
+          },
+          "name": "read_file"
+        }
+      ]
+    },
+    "type": "model_responded"
+  },
+  {
+    "data": {
+      "completed": false,
+      "final_answer": "I need a tool.",
+      "stop_reason": "max_iterations"
+    },
+    "type": "run_completed"
+  }
+]
