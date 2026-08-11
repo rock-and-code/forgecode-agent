@@ -48,6 +48,20 @@ def _read_simple_toml_strings(path: Path) -> dict[str, str]:
     return values
 
 
+def _read_simple_toml_strings_from_descriptor(descriptor: int) -> dict[str, str]:
+    values: dict[str, str] = {}
+    with os.fdopen(descriptor, "r", encoding="utf-8") as config:
+        for line in config:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, raw_value = stripped.split("=", 1)
+            value = raw_value.strip()
+            if len(value) >= 2 and value[0] == value[-1] == '"':
+                values[key.strip()] = value[1:-1]
+    return values
+
+
 def workspace_status(workspace: Path) -> WorkspaceStatus:
     workspace = Path(workspace)
     workspace_ok = workspace.exists() and workspace.is_dir()
@@ -204,6 +218,8 @@ def main(argv: list[str] | None = None) -> int:
     status_parser.add_argument("--workspace", type=Path, default=Path.cwd())
     init_parser = subparsers.add_parser("init")
     init_parser.add_argument("--workspace", type=Path, default=Path.cwd())
+    config_parser = subparsers.add_parser("config")
+    config_parser.add_argument("--workspace", type=Path, default=Path.cwd())
 
     try:
         args = parser.parse_args(argv)
@@ -227,6 +243,48 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"init failed: {status.message}")
         return 0 if status.ok else 1
+
+    if args.command == "config":
+        config_file = args.workspace / ".forge" / "config.toml"
+        forge_descriptor: int | None = None
+        descriptor: int | None = None
+        try:
+            nofollow = getattr(os, "O_NOFOLLOW", 0)
+            if not nofollow:
+                print("config: missing")
+                return 1
+            directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow
+            forge_descriptor = os.open(config_file.parent, directory_flags)
+            if not stat.S_ISDIR(os.fstat(forge_descriptor).st_mode):
+                raise OSError("config parent is not a directory")
+            descriptor = os.open("config.toml", os.O_RDONLY | nofollow, dir_fd=forge_descriptor)
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise OSError("config is not a regular file")
+        except OSError:
+            if descriptor is not None:
+                os.close(descriptor)
+                descriptor = None
+            print("config: missing")
+            return 1
+        finally:
+            if forge_descriptor is not None:
+                os.close(forge_descriptor)
+                forge_descriptor = None
+        try:
+            read_descriptor = descriptor
+            descriptor = None
+            values = _read_simple_toml_strings_from_descriptor(read_descriptor)
+        except (OSError, UnicodeDecodeError):
+            print("config: missing")
+            return 1
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+        for key in sorted(values):
+            print(f"{key}: {values[key]}")
+        if not values:
+            print("config: ok")
+        return 0
 
     status = doctor_status(args.workspace)
     print("ok" if status.ok else "not ok")
