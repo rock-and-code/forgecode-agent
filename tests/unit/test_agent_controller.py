@@ -721,6 +721,53 @@ def test_agent_controller_stops_safely_when_supervised_policy_denies_known_shell
     }
 
 
+def test_agent_controller_supervised_policy_denial_matches_golden_transcript(
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    handler_calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="run_shell",
+            risk="shell",
+            description="Run a shell command.",
+            parameters={
+                "type": "object",
+                "required": ["command"],
+                "properties": {"command": {"type": "string"}},
+            },
+            handler=lambda command: handler_calls.append({"command": command}),
+        )
+    )
+    ledger = RunLedger(run_id="supervised-policy-denial-golden")
+    provider = FakeModelProvider(
+        script=[
+            AssistantMessage(
+                content="I need to run a command.",
+                tool_intents=[ToolIntent(name="run_shell", arguments={"command": "ls"})],
+            ),
+            AssistantMessage(content="This response must not be requested."),
+        ]
+    )
+    controller = AgentController(
+        model_provider=provider,
+        tools=registry,
+        approval_policy=ApprovalPolicy(mode=auto_read_policy.mode, approved_actions=set()),
+        ledger=ledger,
+        max_iterations=1,
+    )
+
+    controller.run(goal="Run ls")
+
+    actual_transcript = [event.to_dict(exclude={"timestamp"}) for event in ledger.events]
+    golden_transcript = json.loads(
+        (GOLDEN_DIR / "supervised_policy_denial_terminal.json").read_text(encoding="utf-8")
+    )
+    assert actual_transcript == golden_transcript
+    assert handler_calls == []
+    assert registry.calls == []
+
+
 def test_agent_controller_stops_safely_when_tool_arguments_are_malformed(
     auto_read_policy: ApprovalPolicy,
 ) -> None:

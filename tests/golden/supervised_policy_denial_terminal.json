@@ -1,0 +1,65 @@
+[
+  {
+    "data": {
+      "goal": "Run ls"
+    },
+    "type": "run_started"
+  },
+  {
+    "data": {
+      "messages": [
+        {
+          "content": "Run ls",
+          "role": "user"
+        }
+      ]
+    },
+    "type": "model_requested"
+  },
+  {
+    "data": {
+      "content": "I need to run a command.",
+      "tool_intents": [
+        {
+          "arguments": {
+            "command": "ls"
+          },
+          "name": "run_shell"
+        }
+      ]
+    },
+    "type": "model_responded"
+  },
+  {
+    "data": {
+      "arguments": {
+        "command": "ls"
+      },
+      "tool": "run_shell"
+    },
+    "type": "tool_call_requested"
+  },
+  {
+    "data": {
+      "allowed": false,
+      "reason": "approval_required",
+      "tool": "run_shell"
+    },
+    "type": "policy_decision"
+  },
+  {
+    "data": {
+      "reason": "approval_required",
+      "tool": "run_shell"
+    },
+    "type": "tool_call_failed"
+  },
+  {
+    "data": {
+      "completed": false,
+      "final_answer": "I need to run a command.",
+      "stop_reason": "approval_required"
+    },
+    "type": "run_completed"
+  }
+]
