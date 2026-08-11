@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import errno
 import os
+import stat
 import sys
 import argparse
 from dataclasses import dataclass
@@ -22,6 +24,15 @@ class WorkspaceStatus:
     config_state: str
     model_provider: str | None
     active_task: str | None
+
+
+@dataclass(frozen=True)
+class InitStatus:
+    workspace: Path
+    forge_dir_created: bool
+    config_created: bool
+    ok: bool
+    message: str | None = None
 
 
 def _read_simple_toml_strings(path: Path) -> dict[str, str]:
@@ -77,6 +88,80 @@ def workspace_status(workspace: Path) -> WorkspaceStatus:
     )
 
 
+def initialize_workspace(workspace: Path) -> InitStatus:
+    workspace = Path(workspace)
+    forge_dir = workspace / ".forge"
+    config_file = forge_dir / "config.toml"
+    forge_dir_created = False
+    config_created = False
+    workspace_descriptor: int | None = None
+    forge_descriptor: int | None = None
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+
+    try:
+        # Walk from the root one component at a time.  Every lookup is
+        # relative to an already-open directory and refuses symlinks, so a
+        # replacement between lookup and mkdir cannot redirect initialization.
+        absolute_workspace = workspace.absolute()
+        workspace_descriptor = os.open(absolute_workspace.anchor, directory_flags)
+        current = Path(absolute_workspace.anchor)
+        for component in absolute_workspace.parts[1:]:
+            current /= component
+            try:
+                child_descriptor = os.open(component, directory_flags, dir_fd=workspace_descriptor)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(component, dir_fd=workspace_descriptor)
+                except FileExistsError:
+                    pass
+                try:
+                    child_descriptor = os.open(component, directory_flags, dir_fd=workspace_descriptor)
+                except OSError as exc:
+                    if exc.errno in (errno.ELOOP, errno.ENOTDIR) and stat.S_ISLNK(os.lstat(current).st_mode):
+                        raise OSError(f"{current} is a symlink.") from exc
+                    raise
+            except OSError as exc:
+                if exc.errno in (errno.ELOOP, errno.ENOTDIR) and stat.S_ISLNK(os.lstat(current).st_mode):
+                    raise OSError(f"{current} is a symlink.") from exc
+                raise
+            os.close(workspace_descriptor)
+            workspace_descriptor = child_descriptor
+
+        try:
+            os.mkdir(".forge", dir_fd=workspace_descriptor)
+            forge_dir_created = True
+        except FileExistsError:
+            forge_mode = os.stat(".forge", dir_fd=workspace_descriptor, follow_symlinks=False).st_mode
+            if stat.S_ISLNK(forge_mode):
+                return InitStatus(workspace, False, False, False, f"{forge_dir} is a symlink.")
+            if not stat.S_ISDIR(forge_mode):
+                return InitStatus(workspace, False, False, False, f"{forge_dir} is not a directory.")
+
+        forge_descriptor = os.open(".forge", directory_flags, dir_fd=workspace_descriptor)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open("config.toml", flags, 0o644, dir_fd=forge_descriptor)
+        except FileExistsError:
+            config_mode = os.stat("config.toml", dir_fd=forge_descriptor, follow_symlinks=False).st_mode
+            if stat.S_ISLNK(config_mode):
+                return InitStatus(workspace, forge_dir_created, False, False, f"{config_file} is a symlink.")
+            if not stat.S_ISREG(config_mode):
+                return InitStatus(workspace, forge_dir_created, False, False, f"{config_file} is not a file.")
+        else:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as config:
+                config.write('model_provider = ""\n')
+            config_created = True
+    except OSError as exc:
+        return InitStatus(workspace, forge_dir_created, config_created, False, str(exc))
+    finally:
+        if forge_descriptor is not None:
+            os.close(forge_descriptor)
+        if workspace_descriptor is not None:
+            os.close(workspace_descriptor)
+
+    return InitStatus(workspace, forge_dir_created, config_created, True)
+
+
 def doctor_status(workspace: Path) -> DoctorStatus:
     workspace = Path(workspace)
     messages: list[str] = []
@@ -117,6 +202,8 @@ def main(argv: list[str] | None = None) -> int:
     doctor_parser.add_argument("--workspace", type=Path, default=Path.cwd())
     status_parser = subparsers.add_parser("status")
     status_parser.add_argument("--workspace", type=Path, default=Path.cwd())
+    init_parser = subparsers.add_parser("init")
+    init_parser.add_argument("--workspace", type=Path, default=Path.cwd())
 
     try:
         args = parser.parse_args(argv)
@@ -130,6 +217,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"model_provider: {status.model_provider or 'none'}")
         print(f"active_task: {status.active_task or 'none'}")
         return 0 if status.workspace_state == "ok" else 1
+
+    if args.command == "init":
+        status = initialize_workspace(args.workspace)
+        if status.ok:
+            print(f"initialized: {status.workspace}")
+            print(f"forge_dir: {'created' if status.forge_dir_created else 'exists'}")
+            print(f"config: {'created' if status.config_created else 'preserved'}")
+        else:
+            print(f"init failed: {status.message}")
+        return 0 if status.ok else 1
 
     status = doctor_status(args.workspace)
     print("ok" if status.ok else "not ok")
