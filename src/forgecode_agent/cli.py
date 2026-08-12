@@ -7,6 +7,7 @@ import re
 import stat
 import sys
 import argparse
+from collections import deque
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
@@ -351,6 +352,62 @@ def doctor_status(workspace: Path) -> DoctorStatus:
     return DoctorStatus(ok=not messages, workspace=workspace, checks=checks, messages=messages)
 
 
+def _positive_limit(value: str) -> int:
+    limit = int(value)
+    if limit < 1:
+        raise argparse.ArgumentTypeError("limit must be at least 1")
+    return limit
+
+
+def _read_audit_events(path: Path, limit: int) -> list[dict[str, object]]:
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise OSError("no-follow audit reading is unavailable")
+    absolute_path = Path(path).absolute()
+    # Resolve only the parent: a symlinked directory such as macOS's /var
+    # must be canonicalized before no-follow descriptor traversal, while the
+    # final audit destination must still be checked with O_NOFOLLOW.
+    try:
+        absolute_path = absolute_path.parent.resolve(strict=True) / absolute_path.name
+    except RuntimeError as exc:
+        # pathlib translates ELOOP into RuntimeError; expose it as the
+        # filesystem error the CLI already handles as an unavailable log.
+        raise OSError(errno.ELOOP, "too many levels of symbolic links", absolute_path.parent) from exc
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow
+    parent_descriptor = os.open(absolute_path.anchor, directory_flags)
+    try:
+        for component in absolute_path.parent.parts[1:]:
+            child_descriptor = os.open(component, directory_flags, dir_fd=parent_descriptor)
+            os.close(parent_descriptor)
+            parent_descriptor = child_descriptor
+        descriptor = os.open(
+            absolute_path.name,
+            os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0),
+            dir_fd=parent_descriptor,
+        )
+    finally:
+        os.close(parent_descriptor)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise OSError("audit log is not a regular file")
+        audit_log = os.fdopen(descriptor, "r", encoding="utf-8")
+        descriptor = None
+        events: deque[dict[str, object]] = deque(maxlen=limit)
+        with audit_log:
+            for line_number, line in enumerate(audit_log, 1):
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"invalid JSON on line {line_number}") from exc
+                if not isinstance(event, dict):
+                    raise ValueError(f"audit event on line {line_number} is not an object")
+                events.append(event)
+        return list(events)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="forgecode")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -367,6 +424,9 @@ def _build_parser() -> argparse.ArgumentParser:
     config_parser.add_argument("--workspace", type=Path, default=Path.cwd())
     config_parser.add_argument("--set", dest="setting")
     config_parser.add_argument("--audit-log", type=Path)
+    audit_parser = subparsers.add_parser("audit")
+    audit_parser.add_argument("--audit-log", type=Path, required=True)
+    audit_parser.add_argument("--limit", type=_positive_limit, default=5)
     return parser
 
 
@@ -378,6 +438,19 @@ def _main_impl(argv: list[str] | None = None) -> int:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else 1
+
+    if args.command == "audit":
+        try:
+            events = _read_audit_events(args.audit_log, args.limit)
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            if isinstance(exc, FileNotFoundError):
+                print(f"audit log missing: {args.audit_log}")
+                return 1
+            print(f"audit log unavailable: {exc}")
+            return 1
+        for event in events:
+            print(json.dumps(event, sort_keys=True))
+        return 0
 
     if args.command == "status":
         status = workspace_status(args.workspace)
@@ -475,7 +548,7 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit:
         audit_args = argparse.Namespace(command=None, audit_log=None)
     result = _main_impl(raw_argv)
-    if audit_args.audit_log is not None and audit_args.command is not None:
+    if audit_args.audit_log is not None and audit_args.command not in {None, "audit"}:
         try:
             _write_audit_event(
                 audit_args.audit_log,
