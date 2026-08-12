@@ -7,6 +7,7 @@ import re
 import stat
 import sys
 import argparse
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,6 +36,45 @@ class InitStatus:
     config_created: bool
     ok: bool
     message: str | None = None
+
+
+def _audit_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _write_audit_event(path: Path, command: str, outcome: str) -> None:
+    event = {
+        "command": command,
+        "action": command,
+        "outcome": outcome,
+        "timestamp": _audit_timestamp(),
+    }
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise OSError("no-follow audit logging is unavailable")
+    nonblock = getattr(os, "O_NONBLOCK", 0)
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow
+    absolute_path = Path(path).absolute()
+    parent_descriptor = os.open(absolute_path.anchor, directory_flags)
+    try:
+        for component in absolute_path.parent.parts[1:]:
+            child_descriptor = os.open(component, directory_flags, dir_fd=parent_descriptor)
+            os.close(parent_descriptor)
+            parent_descriptor = child_descriptor
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | nofollow | nonblock
+        descriptor = os.open(absolute_path.name, flags, 0o644, dir_fd=parent_descriptor)
+    finally:
+        os.close(parent_descriptor)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise OSError("audit log is not a regular file")
+        audit_log = os.fdopen(descriptor, "a", encoding="utf-8")
+        descriptor = None
+        with audit_log:
+            audit_log.write(json.dumps(event, sort_keys=True) + "\n")
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
 
 
 def _read_simple_toml_strings(path: Path) -> dict[str, str]:
@@ -311,19 +351,28 @@ def doctor_status(workspace: Path) -> DoctorStatus:
     return DoctorStatus(ok=not messages, workspace=workspace, checks=checks, messages=messages)
 
 
-def main(argv: list[str] | None = None) -> int:
-    argv = list(sys.argv[1:] if argv is None else argv)
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="forgecode")
     subparsers = parser.add_subparsers(dest="command", required=True)
     doctor_parser = subparsers.add_parser("doctor")
     doctor_parser.add_argument("--workspace", type=Path, default=Path.cwd())
+    doctor_parser.add_argument("--audit-log", type=Path)
     status_parser = subparsers.add_parser("status")
     status_parser.add_argument("--workspace", type=Path, default=Path.cwd())
+    status_parser.add_argument("--audit-log", type=Path)
     init_parser = subparsers.add_parser("init")
     init_parser.add_argument("--workspace", type=Path, default=Path.cwd())
+    init_parser.add_argument("--audit-log", type=Path)
     config_parser = subparsers.add_parser("config")
     config_parser.add_argument("--workspace", type=Path, default=Path.cwd())
     config_parser.add_argument("--set", dest="setting")
+    config_parser.add_argument("--audit-log", type=Path)
+    return parser
+
+
+def _main_impl(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    parser = _build_parser()
 
     try:
         args = parser.parse_args(argv)
@@ -416,3 +465,23 @@ def main(argv: list[str] | None = None) -> int:
     for message in status.messages:
         print(message)
     return 0 if status.ok else 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    audit_parser = _build_parser()
+    try:
+        audit_args, _ = audit_parser.parse_known_args(raw_argv)
+    except SystemExit:
+        audit_args = argparse.Namespace(command=None, audit_log=None)
+    result = _main_impl(raw_argv)
+    if audit_args.audit_log is not None and audit_args.command is not None:
+        try:
+            _write_audit_event(
+                audit_args.audit_log,
+                audit_args.command,
+                "success" if result == 0 else "failure",
+            )
+        except Exception:
+            pass
+    return result
