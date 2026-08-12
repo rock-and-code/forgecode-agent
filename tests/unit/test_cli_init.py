@@ -64,6 +64,23 @@ def test_main_init_reports_existing_config_as_preserved(tmp_path, capsys) -> Non
     )
 
 
+def test_main_init_reports_permission_denied_without_mutation(tmp_path, monkeypatch, capsys) -> None:
+    permission_error = PermissionError(13, "permission denied")
+
+    def deny_forge_creation(path, mode=0o777, *, dir_fd=None):
+        if path == ".forge":
+            raise permission_error
+        raise AssertionError(f"unexpected mkdir: {path}")
+
+    monkeypatch.setattr(cli.os, "mkdir", deny_forge_creation)
+
+    exit_code = cli.main(["init", "--workspace", str(tmp_path)])
+
+    assert exit_code == 1
+    assert capsys.readouterr().out == "init failed: [Errno 13] permission denied\n"
+    assert not (tmp_path / ".forge").exists()
+
+
 def test_initialize_workspace_refuses_symlinked_forge_directory(tmp_path) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()

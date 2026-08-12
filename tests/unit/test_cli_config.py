@@ -227,3 +227,25 @@ def test_config_set_write_failure_preserves_original_config(tmp_path: Path, monk
     assert exit_code == 1
     assert capsys.readouterr().out == "config: missing\n"
     assert config_file.read_text(encoding="utf-8") == original
+
+
+def test_config_set_permission_denied_preserves_original_config(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    config_file = tmp_path / ".forge" / "config.toml"
+    config_file.parent.mkdir()
+    original = 'model_provider = "local"\nother = true\n'
+    config_file.write_text(original, encoding="utf-8")
+
+    def deny_replace(*args, **kwargs):
+        raise PermissionError(13, "permission denied")
+
+    monkeypatch.setattr(cli.os, "replace", deny_replace)
+
+    exit_code = cli.main(
+        ["config", "--workspace", str(tmp_path), "--set", 'model_provider="remote"']
+    )
+
+    assert exit_code == 1
+    assert capsys.readouterr().out == "config: missing\n"
+    assert config_file.read_text(encoding="utf-8") == original
