@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import errno
+import json
 import os
+import re
 import stat
 import sys
 import argparse
@@ -60,6 +62,107 @@ def _read_simple_toml_strings_from_descriptor(descriptor: int) -> dict[str, str]
             if len(value) >= 2 and value[0] == value[-1] == '"':
                 values[key.strip()] = value[1:-1]
     return values
+
+
+def _update_config_from_descriptor(forge_descriptor: int, descriptor: int, key: str, value: str) -> None:
+    try:
+        mode = stat.S_IMODE(os.fstat(descriptor).st_mode)
+        with os.fdopen(descriptor, "r", encoding="utf-8") as config:
+            lines = config.read().splitlines(keepends=True)
+        replacement = f'{key} = {json.dumps(value)}\n'
+        pattern = re.compile(rf"^(\s*{re.escape(key)}\s*=).*$")
+        matches = [index for index, line in enumerate(lines) if pattern.match(line.rstrip("\r\n"))]
+        if len(matches) > 1:
+            raise ValueError("duplicate supported config key")
+        if matches:
+            lines[matches[0]] = replacement
+        else:
+            if lines and not lines[-1].endswith(("\n", "\r")):
+                lines.append("\n")
+            lines.append(replacement)
+
+        temporary_name: str | None = None
+        temporary_descriptor: int | None = None
+        try:
+            for attempt in range(100):
+                candidate = f".config.toml.tmp.{os.getpid()}.{attempt}"
+                try:
+                    temporary_descriptor = os.open(
+                        candidate,
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                        mode,
+                        dir_fd=forge_descriptor,
+                    )
+                    temporary_name = candidate
+                    break
+                except FileExistsError:
+                    continue
+            if temporary_descriptor is None or temporary_name is None:
+                raise OSError("unable to create temporary config")
+            with os.fdopen(temporary_descriptor, "w", encoding="utf-8") as temporary:
+                temporary_descriptor = None
+                temporary.writelines(lines)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.chmod(temporary_name, mode, dir_fd=forge_descriptor, follow_symlinks=False)
+            os.replace(
+                temporary_name,
+                "config.toml",
+                src_dir_fd=forge_descriptor,
+                dst_dir_fd=forge_descriptor,
+            )
+            temporary_name = None
+            os.fsync(forge_descriptor)
+        finally:
+            if temporary_descriptor is not None:
+                os.close(temporary_descriptor)
+            if temporary_name is not None:
+                try:
+                    os.unlink(temporary_name, dir_fd=forge_descriptor)
+                except FileNotFoundError:
+                    pass
+    finally:
+        # The descriptor is owned by this function, including on validation errors.
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+
+
+def _open_config_descriptor(workspace: Path, access: int) -> tuple[int, int]:
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise OSError("no-follow traversal is unavailable")
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow
+    absolute_workspace = Path(workspace).absolute()
+    workspace_descriptor = os.open(absolute_workspace.anchor, directory_flags)
+    try:
+        for component in absolute_workspace.parts[1:]:
+            child_descriptor = os.open(component, directory_flags, dir_fd=workspace_descriptor)
+            os.close(workspace_descriptor)
+            workspace_descriptor = child_descriptor
+        forge_descriptor = os.open(".forge", directory_flags, dir_fd=workspace_descriptor)
+    except OSError:
+        os.close(workspace_descriptor)
+        raise
+    os.close(workspace_descriptor)
+    try:
+        descriptor = os.open("config.toml", access | nofollow, dir_fd=forge_descriptor)
+    except OSError:
+        os.close(forge_descriptor)
+        raise
+    return forge_descriptor, descriptor
+
+
+def _parse_config_setting(raw_value: str) -> str | None:
+    try:
+        value = json.loads(raw_value)
+    except json.JSONDecodeError:
+        if len(raw_value) >= 2 and raw_value[0] == raw_value[-1] == "'":
+            value = raw_value[1:-1]
+        else:
+            return None
+    return value if isinstance(value, str) and value else None
 
 
 def workspace_status(workspace: Path) -> WorkspaceStatus:
@@ -220,6 +323,7 @@ def main(argv: list[str] | None = None) -> int:
     init_parser.add_argument("--workspace", type=Path, default=Path.cwd())
     config_parser = subparsers.add_parser("config")
     config_parser.add_argument("--workspace", type=Path, default=Path.cwd())
+    config_parser.add_argument("--set", dest="setting")
 
     try:
         args = parser.parse_args(argv)
@@ -246,30 +350,48 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "config":
         config_file = args.workspace / ".forge" / "config.toml"
+        setting: tuple[str, str] | None = None
+        if args.setting is not None:
+            match = re.fullmatch(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*", args.setting)
+            if not match or match.group(1) not in {"model_provider", "approval_mode"}:
+                print("config: invalid")
+                return 1
+            value = _parse_config_setting(match.group(2))
+            if value is None:
+                print("config: invalid")
+                return 1
+            setting = (match.group(1), value)
         forge_descriptor: int | None = None
         descriptor: int | None = None
         try:
-            nofollow = getattr(os, "O_NOFOLLOW", 0)
-            if not nofollow:
-                print("config: missing")
-                return 1
-            directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow
-            forge_descriptor = os.open(config_file.parent, directory_flags)
-            if not stat.S_ISDIR(os.fstat(forge_descriptor).st_mode):
-                raise OSError("config parent is not a directory")
-            descriptor = os.open("config.toml", os.O_RDONLY | nofollow, dir_fd=forge_descriptor)
+            access = os.O_RDWR if setting is not None else os.O_RDONLY
+            forge_descriptor, descriptor = _open_config_descriptor(args.workspace, access)
             if not stat.S_ISREG(os.fstat(descriptor).st_mode):
                 raise OSError("config is not a regular file")
         except OSError:
             if descriptor is not None:
                 os.close(descriptor)
                 descriptor = None
-            print("config: missing")
-            return 1
-        finally:
             if forge_descriptor is not None:
                 os.close(forge_descriptor)
                 forge_descriptor = None
+            print("config: missing")
+            return 1
+        if setting is not None:
+            try:
+                update_descriptor = descriptor
+                descriptor = None
+                _update_config_from_descriptor(forge_descriptor, update_descriptor, *setting)
+            except ValueError:
+                print("config: invalid")
+                return 1
+            except (OSError, UnicodeDecodeError):
+                print("config: missing")
+                return 1
+            finally:
+                os.close(forge_descriptor)
+            print("config: updated")
+            return 0
         try:
             read_descriptor = descriptor
             descriptor = None
@@ -280,6 +402,7 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             if descriptor is not None:
                 os.close(descriptor)
+            os.close(forge_descriptor)
         for key in sorted(values):
             print(f"{key}: {values[key]}")
         if not values:
