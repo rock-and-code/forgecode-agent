@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 from forgecode_agent import cli
 from forgecode_agent.cli import DoctorStatus, doctor_status
@@ -107,6 +113,72 @@ def test_doctor_status_reports_config_file_missing_when_config_path_is_directory
         "credentials": "ok",
     }
     assert status.messages == ["No ForgeCode config file found in workspace."]
+
+
+def test_doctor_status_reports_fifo_config_as_missing_without_blocking(tmp_path, monkeypatch) -> None:
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("FIFO creation is unavailable")
+
+    config_dir = tmp_path / ".forge"
+    config_dir.mkdir()
+    os.mkfifo(config_dir / "config.toml")
+    monkeypatch.delenv("FORGECODE_MODEL_PROVIDER", raising=False)
+    monkeypatch.delenv("FORGECODE_API_KEY", raising=False)
+
+    script = (
+        "import json, sys; "
+        "from forgecode_agent.cli import doctor_status; "
+        "status = doctor_status(sys.argv[1]); "
+        "print(json.dumps(status.checks))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path)],
+        capture_output=True,
+        check=True,
+        text=True,
+        timeout=2,
+    )
+
+    assert json.loads(result.stdout)["config_file"] == "missing"
+
+
+def test_doctor_status_rejects_symlinked_config_file(tmp_path, monkeypatch) -> None:
+    outside_config = tmp_path / "outside-config.toml"
+    outside_config.write_text('model_provider = "untrusted"\n', encoding="utf-8")
+    config_dir = tmp_path / ".forge"
+    config_dir.mkdir()
+    (config_dir / "config.toml").symlink_to(outside_config)
+    monkeypatch.delenv("FORGECODE_MODEL_PROVIDER", raising=False)
+    monkeypatch.delenv("FORGECODE_API_KEY", raising=False)
+
+    status = doctor_status(workspace=tmp_path)
+
+    assert status.checks["config_file"] == "missing"
+    assert status.checks["model_provider"] == "missing"
+    assert status.messages == [
+        "No ForgeCode config file found in workspace.",
+        "FORGECODE_MODEL_PROVIDER is not set.",
+        "FORGECODE_API_KEY is not set.",
+    ]
+
+
+def test_doctor_status_rejects_symlinked_forge_directory(tmp_path, monkeypatch) -> None:
+    outside_forge = tmp_path / "outside-forge"
+    outside_forge.mkdir()
+    (outside_forge / "config.toml").write_text('model_provider = "untrusted"\n', encoding="utf-8")
+    (tmp_path / ".forge").symlink_to(outside_forge, target_is_directory=True)
+    monkeypatch.delenv("FORGECODE_MODEL_PROVIDER", raising=False)
+    monkeypatch.delenv("FORGECODE_API_KEY", raising=False)
+
+    status = doctor_status(workspace=tmp_path)
+
+    assert status.checks["config_file"] == "missing"
+    assert status.checks["model_provider"] == "missing"
+    assert status.messages == [
+        "No ForgeCode config file found in workspace.",
+        "FORGECODE_MODEL_PROVIDER is not set.",
+        "FORGECODE_API_KEY is not set.",
+    ]
 
 
 def test_doctor_status_reports_empty_api_key_as_missing_with_message(tmp_path, monkeypatch) -> None:

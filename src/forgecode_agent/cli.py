@@ -188,7 +188,8 @@ def _open_config_descriptor(workspace: Path, access: int) -> tuple[int, int]:
         raise
     os.close(workspace_descriptor)
     try:
-        descriptor = os.open("config.toml", access | nofollow, dir_fd=forge_descriptor)
+        nonblock = getattr(os, "O_NONBLOCK", 0)
+        descriptor = os.open("config.toml", access | nofollow | nonblock, dir_fd=forge_descriptor)
     except OSError:
         os.close(forge_descriptor)
         raise
@@ -323,19 +324,32 @@ def initialize_workspace(workspace: Path) -> InitStatus:
 def doctor_status(workspace: Path) -> DoctorStatus:
     workspace = Path(workspace)
     messages: list[str] = []
-    config_file = workspace / ".forge" / "config.toml"
+    config_file_ok = False
     provider = os.environ.get("FORGECODE_MODEL_PROVIDER")
-    if not provider and config_file.is_file():
-        try:
-            provider = _read_simple_toml_strings(config_file).get("model_provider")
-        except (OSError, UnicodeDecodeError):
-            provider = None
+    forge_descriptor: int | None = None
+    config_descriptor: int | None = None
+    try:
+        forge_descriptor, config_descriptor = _open_config_descriptor(workspace, os.O_RDONLY)
+        config_file_ok = stat.S_ISREG(os.fstat(config_descriptor).st_mode)
+        if not config_file_ok:
+            raise OSError("config is not a regular file")
+        if not provider:
+            descriptor = config_descriptor
+            config_descriptor = None
+            provider = _read_simple_toml_strings_from_descriptor(descriptor).get("model_provider")
+    except (OSError, UnicodeDecodeError):
+        provider = provider or None
+    finally:
+        if config_descriptor is not None:
+            os.close(config_descriptor)
+        if forge_descriptor is not None:
+            os.close(forge_descriptor)
     api_key = os.environ.get("FORGECODE_API_KEY")
 
     checks = {
         "python": "ok",
         "workspace": "ok" if workspace.exists() and workspace.is_dir() else "missing",
-        "config_file": "ok" if config_file.is_file() else "missing",
+        "config_file": "ok" if config_file_ok else "missing",
         "model_provider": f"ok: {provider}" if provider else "missing",
         "credentials": "ok" if api_key else "missing",
     }
