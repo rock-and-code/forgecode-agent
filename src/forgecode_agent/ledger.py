@@ -90,8 +90,13 @@ class RunLedger:
     @classmethod
     def read_jsonl(cls, path: str | Path) -> RunLedger:
         input_path = Path(path)
+        try:
+            input_text = input_path.read_text(encoding="utf-8")
+        except OSError:
+            raise ValueError("Cannot read JSONL ledger file/path") from None
+
         rows = []
-        for line_number, line in enumerate(input_path.read_text(encoding="utf-8").splitlines(), start=1):
+        for line_number, line in enumerate(input_text.splitlines(), start=1):
             if not line:
                 continue
             row_index = len(rows)

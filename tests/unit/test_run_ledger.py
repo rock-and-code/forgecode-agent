@@ -53,6 +53,18 @@ def test_read_jsonl_reloads_persisted_events_in_file_order(tmp_path) -> None:
     assert [event.timestamp for event in reloaded.events] == [0, 1]
 
 
+def test_read_jsonl_rejects_directory_input_with_value_error(tmp_path) -> None:
+    ledger_directory = tmp_path / "ledger-directory"
+    ledger_directory.mkdir()
+
+    with pytest.raises(ValueError) as exc_info:
+        RunLedger.read_jsonl(ledger_directory)
+
+    message = str(exc_info.value).lower()
+    assert "jsonl ledger" in message
+    assert "file" in message or "path" in message
+
+
 def test_read_jsonl_rejects_empty_files(tmp_path) -> None:
     output_path = tmp_path / "empty.jsonl"
     output_path.write_text("", encoding="utf-8")
