@@ -85,6 +85,24 @@ def test_workspace_status_treats_config_directory_as_missing(tmp_path) -> None:
     assert status.model_provider is None
 
 
+def test_workspace_status_ignores_active_task_directory(tmp_path, monkeypatch) -> None:
+    forge_dir = tmp_path / ".forge"
+    forge_dir.mkdir()
+    active_task_file = forge_dir / "active-task.toml"
+    active_task_file.mkdir()
+
+    def fail_if_active_task_is_read(path: Path) -> dict[str, str]:
+        raise AssertionError(f"should not read directory: {path}")
+
+    monkeypatch.setattr(cli, "_read_simple_toml_strings", fail_if_active_task_is_read)
+
+    status = workspace_status(tmp_path)
+
+    assert status.workspace_state == "ok"
+    assert status.config_state == "missing"
+    assert status.active_task is None
+
+
 def test_main_status_workspace_option_uses_provided_workspace(tmp_path, monkeypatch, capsys) -> None:
     workspace = tmp_path / "project"
     workspace.mkdir()

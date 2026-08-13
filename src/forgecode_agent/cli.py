@@ -223,7 +223,7 @@ def workspace_status(workspace: Path) -> WorkspaceStatus:
         model_provider = config.get("model_provider")
 
     active_task: str | None = None
-    if active_task_file.exists():
+    if active_task_file.is_file():
         try:
             task = _read_simple_toml_strings(active_task_file)
         except (OSError, UnicodeDecodeError):
