@@ -37,6 +37,14 @@ def test_write_jsonl_persists_ordered_events_with_run_id_and_stable_keys(tmp_pat
     assert [json.loads(line)["type"] for line in lines] == ["run_started", "run_completed"]
 
 
+def test_write_jsonl_does_not_normalize_serialization_type_error(tmp_path) -> None:
+    ledger = RunLedger(run_id="serialization-type-error-test")
+    ledger.append("run_started", {"unsupported": object()})
+
+    with pytest.raises(TypeError, match="not JSON serializable"):
+        ledger.write_jsonl(tmp_path / "ledger.jsonl")
+
+
 def test_write_jsonl_rejects_symlink_output_without_modifying_target(tmp_path) -> None:
     if not hasattr(os, "O_NOFOLLOW"):
         pytest.skip("Symlink-safe file opening is unavailable on this platform")
@@ -179,6 +187,25 @@ def test_read_jsonl_normalizes_unsupported_descriptor_open_errors(
         RunLedger.read_jsonl(output_path)
 
     assert str(exc_info.value) == "Cannot read JSONL ledger file/path"
+    assert str(output_path) not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+
+
+@pytest.mark.parametrize("unsupported_error", [NotImplementedError, TypeError])
+def test_write_jsonl_normalizes_unsupported_descriptor_open_errors(
+    tmp_path, monkeypatch, unsupported_error
+) -> None:
+    output_path = tmp_path / "ledger.jsonl"
+
+    def unsupported_open(*args, **kwargs):
+        raise unsupported_error("unsupported descriptor-relative open")
+
+    monkeypatch.setattr(os, "open", unsupported_open)
+
+    with pytest.raises(ValueError) as exc_info:
+        RunLedger(run_id="unsupported-open-test").write_jsonl(output_path)
+
+    assert str(exc_info.value) == "Cannot write JSONL ledger file/path"
     assert str(output_path) not in str(exc_info.value)
     assert exc_info.value.__cause__ is None
 

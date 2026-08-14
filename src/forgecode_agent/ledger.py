@@ -189,6 +189,12 @@ class RunLedger:
         file_descriptor = -1
         parent_descriptor = -1
         try:
+            def open_descriptor(*args: Any, **kwargs: Any) -> int:
+                try:
+                    return os.open(*args, **kwargs)
+                except (NotImplementedError, TypeError):
+                    raise ValueError("Cannot write JSONL ledger file/path") from None
+
             nofollow = getattr(os, "O_NOFOLLOW", None)
             directory_flag = getattr(os, "O_DIRECTORY", None)
             if nofollow is None or directory_flag is None:
@@ -196,24 +202,24 @@ class RunLedger:
 
             directory_flags = os.O_RDONLY | directory_flag | nofollow
             if output_path.is_absolute():
-                parent_descriptor = os.open(output_path.anchor, directory_flags)
+                parent_descriptor = open_descriptor(output_path.anchor, directory_flags)
                 parent_parts = output_path.parts[1:-1]
             else:
-                parent_descriptor = os.open(".", directory_flags)
+                parent_descriptor = open_descriptor(".", directory_flags)
                 parent_parts = output_path.parts[:-1]
             for part in parent_parts:
                 try:
-                    next_descriptor = os.open(part, directory_flags, dir_fd=parent_descriptor)
+                    next_descriptor = open_descriptor(part, directory_flags, dir_fd=parent_descriptor)
                 except FileNotFoundError:
                     try:
                         os.mkdir(part, 0o777, dir_fd=parent_descriptor)
                     except FileExistsError:
                         pass
-                    next_descriptor = os.open(part, directory_flags, dir_fd=parent_descriptor)
+                    next_descriptor = open_descriptor(part, directory_flags, dir_fd=parent_descriptor)
                 os.close(parent_descriptor)
                 parent_descriptor = next_descriptor
 
-            file_descriptor = os.open(
+            file_descriptor = open_descriptor(
                 output_path.name,
                 os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NONBLOCK | nofollow,
                 0o666,
