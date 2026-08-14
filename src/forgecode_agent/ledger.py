@@ -98,23 +98,44 @@ class RunLedger:
         all inputs rather than falling back to path-based I/O.
         """
         input_path = Path(path)
+        file_descriptor = -1
+        parent_descriptor = -1
         try:
             nofollow = getattr(os, "O_NOFOLLOW", None)
-            if nofollow is None:
+            directory_flag = getattr(os, "O_DIRECTORY", None)
+            if nofollow is None or directory_flag is None:
                 raise OSError
-            file_descriptor = os.open(input_path, os.O_RDONLY | os.O_NONBLOCK | nofollow)
-            try:
-                file_stat = os.fstat(file_descriptor)
-                if not stat.S_ISREG(file_stat.st_mode):
-                    raise OSError
-                with os.fdopen(file_descriptor, "r", encoding="utf-8") as file:
-                    file_descriptor = -1
-                    input_text = file.read()
-            finally:
-                if file_descriptor != -1:
-                    os.close(file_descriptor)
-        except OSError:
+
+            directory_flags = os.O_RDONLY | directory_flag | nofollow
+            if input_path.is_absolute():
+                parent_descriptor = os.open(input_path.anchor, directory_flags)
+                parent_parts = input_path.parts[1:-1]
+            else:
+                parent_descriptor = os.open(".", directory_flags)
+                parent_parts = input_path.parts[:-1]
+            for part in parent_parts:
+                next_descriptor = os.open(part, directory_flags, dir_fd=parent_descriptor)
+                os.close(parent_descriptor)
+                parent_descriptor = next_descriptor
+
+            file_descriptor = os.open(
+                input_path.name,
+                os.O_RDONLY | os.O_NONBLOCK | nofollow,
+                dir_fd=parent_descriptor,
+            )
+            file_stat = os.fstat(file_descriptor)
+            if not stat.S_ISREG(file_stat.st_mode):
+                raise OSError
+            with os.fdopen(file_descriptor, "r", encoding="utf-8") as file:
+                file_descriptor = -1
+                input_text = file.read()
+        except (OSError, NotImplementedError, TypeError):
             raise ValueError("Cannot read JSONL ledger file/path") from None
+        finally:
+            if file_descriptor != -1:
+                os.close(file_descriptor)
+            if parent_descriptor != -1:
+                os.close(parent_descriptor)
 
         rows = []
         for line_number, line in enumerate(input_text.splitlines(), start=1):

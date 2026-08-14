@@ -129,7 +129,7 @@ def test_read_jsonl_rejects_directory_input_with_value_error(tmp_path) -> None:
 
 
 def test_read_jsonl_rejects_symlink_input_without_reading_target(tmp_path) -> None:
-    if not hasattr(os, "O_NOFOLLOW"):
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
         pytest.skip("Symlink-safe file opening is unavailable on this platform")
     target_path = tmp_path / "valid.jsonl"
     target_path.write_text(
@@ -141,6 +141,46 @@ def test_read_jsonl_rejects_symlink_input_without_reading_target(tmp_path) -> No
 
     with pytest.raises(ValueError, match="(?i)jsonl ledger"):
         RunLedger.read_jsonl(symlink_path)
+
+
+def test_read_jsonl_rejects_symlinked_parent_without_reading_target(tmp_path) -> None:
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+        pytest.skip("Symlink-safe directory opening is unavailable on this platform")
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    target_path = real_parent / "valid.jsonl"
+    target_path.write_text(
+        json.dumps({"type": "one", "data": {}, "timestamp": 0, "run_id": "same"}) + "\n",
+        encoding="utf-8",
+    )
+    symlink_parent = tmp_path / "symlink-parent"
+    symlink_parent.symlink_to(real_parent, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="(?i)jsonl ledger"):
+        RunLedger.read_jsonl(symlink_parent / "valid.jsonl")
+
+
+@pytest.mark.parametrize("unsupported_error", [NotImplementedError, TypeError])
+def test_read_jsonl_normalizes_unsupported_descriptor_open_errors(
+    tmp_path, monkeypatch, unsupported_error
+) -> None:
+    output_path = tmp_path / "valid.jsonl"
+    output_path.write_text(
+        json.dumps({"type": "one", "data": {}, "timestamp": 0, "run_id": "same"}) + "\n",
+        encoding="utf-8",
+    )
+
+    def unsupported_open(*args, **kwargs):
+        raise unsupported_error("unsupported descriptor-relative open")
+
+    monkeypatch.setattr(os, "open", unsupported_open)
+
+    with pytest.raises(ValueError) as exc_info:
+        RunLedger.read_jsonl(output_path)
+
+    assert str(exc_info.value) == "Cannot read JSONL ledger file/path"
+    assert str(output_path) not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
 
 
 def test_read_jsonl_fails_closed_without_o_nofollow(tmp_path, monkeypatch) -> None:
