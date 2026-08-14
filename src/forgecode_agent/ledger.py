@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import stat
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -89,9 +91,28 @@ class RunLedger:
 
     @classmethod
     def read_jsonl(cls, path: str | Path) -> RunLedger:
+        """Read a regular, non-symlink JSONL file.
+
+        Symlink safety is fail-closed: platforms without ``O_NOFOLLOW`` do
+        not have a safe equivalent for this operation and therefore reject
+        all inputs rather than falling back to path-based I/O.
+        """
         input_path = Path(path)
         try:
-            input_text = input_path.read_text(encoding="utf-8")
+            nofollow = getattr(os, "O_NOFOLLOW", None)
+            if nofollow is None:
+                raise OSError
+            file_descriptor = os.open(input_path, os.O_RDONLY | os.O_NONBLOCK | nofollow)
+            try:
+                file_stat = os.fstat(file_descriptor)
+                if not stat.S_ISREG(file_stat.st_mode):
+                    raise OSError
+                with os.fdopen(file_descriptor, "r", encoding="utf-8") as file:
+                    file_descriptor = -1
+                    input_text = file.read()
+            finally:
+                if file_descriptor != -1:
+                    os.close(file_descriptor)
         except OSError:
             raise ValueError("Cannot read JSONL ledger file/path") from None
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -63,6 +64,43 @@ def test_read_jsonl_rejects_directory_input_with_value_error(tmp_path) -> None:
     message = str(exc_info.value).lower()
     assert "jsonl ledger" in message
     assert "file" in message or "path" in message
+
+
+def test_read_jsonl_rejects_symlink_input_without_reading_target(tmp_path) -> None:
+    if not hasattr(os, "O_NOFOLLOW"):
+        pytest.skip("Symlink-safe file opening is unavailable on this platform")
+    target_path = tmp_path / "valid.jsonl"
+    target_path.write_text(
+        json.dumps({"type": "one", "data": {}, "timestamp": 0, "run_id": "same"}) + "\n",
+        encoding="utf-8",
+    )
+    symlink_path = tmp_path / "ledger-link.jsonl"
+    symlink_path.symlink_to(target_path)
+
+    with pytest.raises(ValueError, match="(?i)jsonl ledger"):
+        RunLedger.read_jsonl(symlink_path)
+
+
+def test_read_jsonl_fails_closed_without_o_nofollow(tmp_path, monkeypatch) -> None:
+    output_path = tmp_path / "valid.jsonl"
+    output_path.write_text(
+        json.dumps({"type": "one", "data": {}, "timestamp": 0, "run_id": "same"}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+
+    with pytest.raises(ValueError, match="(?i)jsonl ledger"):
+        RunLedger.read_jsonl(output_path)
+
+
+def test_read_jsonl_rejects_fifo_without_blocking(tmp_path) -> None:
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("FIFO creation is unavailable on this platform")
+    fifo_path = tmp_path / "ledger.fifo"
+    os.mkfifo(fifo_path)
+
+    with pytest.raises(ValueError, match="(?i)jsonl ledger"):
+        RunLedger.read_jsonl(fifo_path)
 
 
 def test_read_jsonl_rejects_empty_files(tmp_path) -> None:
