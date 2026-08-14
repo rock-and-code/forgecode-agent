@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 
 import pytest
 
@@ -34,6 +35,67 @@ def test_write_jsonl_persists_ordered_events_with_run_id_and_stable_keys(tmp_pat
         '{"data":{"completed":true},"run_id":"jsonl-test","timestamp":1,"type":"run_completed"}',
     ]
     assert [json.loads(line)["type"] for line in lines] == ["run_started", "run_completed"]
+
+
+def test_write_jsonl_rejects_symlink_output_without_modifying_target(tmp_path) -> None:
+    if not hasattr(os, "O_NOFOLLOW"):
+        pytest.skip("Symlink-safe file opening is unavailable on this platform")
+    ledger = RunLedger(run_id="symlink-output-test")
+    ledger.append("run_started", {"status": "new"})
+    target_path = tmp_path / "target.jsonl"
+    target_path.write_text("do not overwrite\n", encoding="utf-8")
+    symlink_path = tmp_path / "ledger-link.jsonl"
+    symlink_path.symlink_to(target_path)
+
+    with pytest.raises(ValueError) as exc_info:
+        ledger.write_jsonl(symlink_path)
+
+    message = str(exc_info.value).lower()
+    assert "jsonl ledger" in message
+    assert str(symlink_path).lower() not in message
+    assert target_path.read_text(encoding="utf-8") == "do not overwrite\n"
+
+
+def test_write_jsonl_rejects_symlinked_parent_without_writing_through_it(tmp_path) -> None:
+    if not hasattr(os, "O_NOFOLLOW"):
+        pytest.skip("Symlink-safe directory opening is unavailable on this platform")
+    ledger = RunLedger(run_id="symlink-parent-test")
+    ledger.append("run_started", {"status": "new"})
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    symlink_parent = tmp_path / "symlink-parent"
+    symlink_parent.symlink_to(real_parent, target_is_directory=True)
+
+    with pytest.raises(ValueError) as exc_info:
+        ledger.write_jsonl(symlink_parent / "ledger.jsonl")
+
+    message = str(exc_info.value).lower()
+    assert "jsonl ledger" in message
+    assert str(symlink_parent).lower() not in message
+    assert not (real_parent / "ledger.jsonl").exists()
+
+
+def test_write_jsonl_rejects_fifo_without_blocking(tmp_path) -> None:
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("FIFO creation is unavailable on this platform")
+    fifo_path = tmp_path / "ledger.fifo"
+    os.mkfifo(fifo_path)
+
+    def interrupt_fifo_open(signum, frame):
+        raise TimeoutError("FIFO open blocked")
+
+    previous_handler = signal.signal(signal.SIGALRM, interrupt_fifo_open)
+    signal.setitimer(signal.ITIMER_REAL, 1.0)
+    try:
+        with pytest.raises(ValueError) as exc_info:
+            RunLedger(run_id="fifo-output-test").write_jsonl(fifo_path)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
+    message = str(exc_info.value).lower()
+    assert "jsonl ledger" in message
+    assert str(fifo_path).lower() not in message
 
 
 def test_read_jsonl_reloads_persisted_events_in_file_order(tmp_path) -> None:

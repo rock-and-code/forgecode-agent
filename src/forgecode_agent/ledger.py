@@ -156,11 +156,61 @@ class RunLedger:
         return ledger
 
     def write_jsonl(self, path: str | Path, *, redact_keys: set[str] | None = None) -> None:
+        """Write JSONL to a regular, non-symlink output file.
+
+        Symlink safety is fail-closed: platforms without ``O_NOFOLLOW`` do
+        not have a safe equivalent for this operation and therefore reject
+        all inputs rather than falling back to path-based I/O.
+        """
         output_path = Path(path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
         key_fragments = DEFAULT_REDACT_KEYS if redact_keys is None else DEFAULT_REDACT_KEYS | redact_keys
-        with output_path.open("w", encoding="utf-8") as file:
-            for event in self.events:
-                row = event.to_dict() | {"run_id": self.run_id}
-                row["data"] = _redact(row["data"], key_fragments)
-                file.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
+
+        file_descriptor = -1
+        parent_descriptor = -1
+        try:
+            nofollow = getattr(os, "O_NOFOLLOW", None)
+            directory_flag = getattr(os, "O_DIRECTORY", None)
+            if nofollow is None or directory_flag is None:
+                raise OSError
+
+            directory_flags = os.O_RDONLY | directory_flag | nofollow
+            if output_path.is_absolute():
+                parent_descriptor = os.open(output_path.anchor, directory_flags)
+                parent_parts = output_path.parts[1:-1]
+            else:
+                parent_descriptor = os.open(".", directory_flags)
+                parent_parts = output_path.parts[:-1]
+            for part in parent_parts:
+                try:
+                    next_descriptor = os.open(part, directory_flags, dir_fd=parent_descriptor)
+                except FileNotFoundError:
+                    try:
+                        os.mkdir(part, 0o777, dir_fd=parent_descriptor)
+                    except FileExistsError:
+                        pass
+                    next_descriptor = os.open(part, directory_flags, dir_fd=parent_descriptor)
+                os.close(parent_descriptor)
+                parent_descriptor = next_descriptor
+
+            file_descriptor = os.open(
+                output_path.name,
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NONBLOCK | nofollow,
+                0o666,
+                dir_fd=parent_descriptor,
+            )
+            file_stat = os.fstat(file_descriptor)
+            if not stat.S_ISREG(file_stat.st_mode):
+                raise OSError
+            with os.fdopen(file_descriptor, "w", encoding="utf-8") as file:
+                file_descriptor = -1
+                for event in self.events:
+                    row = event.to_dict() | {"run_id": self.run_id}
+                    row["data"] = _redact(row["data"], key_fragments)
+                    file.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
+        except OSError:
+            raise ValueError("Cannot write JSONL ledger file/path") from None
+        finally:
+            if file_descriptor != -1:
+                os.close(file_descriptor)
+            if parent_descriptor != -1:
+                os.close(parent_descriptor)
