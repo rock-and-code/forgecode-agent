@@ -33,11 +33,26 @@ class AgentController:
         self.ledger.append("run_started", {"goal": goal})
         messages: list[dict[str, Any]] = [{"role": "user", "content": goal}]
         iterations = 0
+        last_answer = goal
 
         while True:
             self.ledger.append("model_requested", {"messages": messages})
-            response = self.model_provider.complete(messages=messages)
+            try:
+                response = self.model_provider.complete(messages=messages)
+            except Exception as exc:
+                self.ledger.append("model_error", {"error_type": type(exc).__name__})
+                self.ledger.append(
+                    "run_completed",
+                    {"final_answer": last_answer, "completed": False, "stop_reason": "model_error"},
+                )
+                return AgentRunResult(
+                    final_answer=last_answer,
+                    completed=False,
+                    iterations=iterations,
+                    stop_reason="model_error",
+                )
             self.ledger.append("model_responded", self._message_data(response))
+            last_answer = response.content
 
             if not response.tool_intents:
                 self.ledger.append("run_completed", {"final_answer": response.content, "completed": True})

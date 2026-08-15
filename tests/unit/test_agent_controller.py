@@ -406,6 +406,60 @@ def test_agent_controller_stops_without_tool_execution_when_model_returns_multip
     }
 
 
+def test_agent_controller_model_error_normalizes_provider_failure_after_safe_response(
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    class FailingProvider:
+        def __init__(self) -> None:
+            self.requests: list[dict[str, object]] = []
+
+        def complete(self, *, messages: list[dict[str, object]]) -> AssistantMessage:
+            self.requests.append({"messages": messages})
+            if len(self.requests) == 1:
+                return AssistantMessage(
+                    content="Safe fallback answer.",
+                    tool_intents=[ToolIntent(name="read_file", arguments={"path": "README.md"})],
+                )
+            raise RuntimeError("provider payload contains sensitive details")
+
+    ledger = RunLedger(run_id="model-error")
+    provider = FailingProvider()
+    controller = AgentController(
+        model_provider=provider,
+        tools=read_only_registry.clone_empty_history(),
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+        max_iterations=1,
+    )
+
+    result = controller.run(goal="Read README.md")
+
+    assert result.final_answer == "Safe fallback answer."
+    assert result.completed is False
+    assert result.iterations == 1
+    assert result.stop_reason == "model_error"
+    assert len(provider.requests) == 2
+    assert [event.type for event in ledger.events] == [
+        "run_started",
+        "model_requested",
+        "model_responded",
+        "tool_call_requested",
+        "policy_decision",
+        "tool_call_completed",
+        "model_requested",
+        "model_error",
+        "run_completed",
+    ]
+    assert ledger.events[-2].data == {"error_type": "RuntimeError"}
+    assert ledger.events[-1].data == {
+        "final_answer": "Safe fallback answer.",
+        "completed": False,
+        "stop_reason": "model_error",
+    }
+    assert all("sensitive details" not in str(event.data) for event in ledger.events)
+
+
 def test_agent_controller_multiple_tool_calls_terminal_path_matches_golden_transcript(
     read_only_registry: ToolRegistry,
     auto_read_policy: ApprovalPolicy,
