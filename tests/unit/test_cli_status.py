@@ -29,6 +29,26 @@ def test_workspace_status_reports_missing_workspace(tmp_path) -> None:
     assert status.active_task is None
 
 
+def test_workspace_status_reports_symlink_workspace_as_missing(tmp_path) -> None:
+    target_workspace = tmp_path / "target"
+    target_workspace.mkdir()
+    target_forge_dir = target_workspace / ".forge"
+    target_forge_dir.mkdir()
+    (target_forge_dir / "config.toml").write_text(
+        'model_provider = "fake"\n', encoding="utf-8"
+    )
+    workspace = tmp_path / "workspace-link"
+    workspace.symlink_to(target_workspace, target_is_directory=True)
+
+    status = workspace_status(workspace)
+
+    assert status.workspace == workspace
+    assert status.workspace_state == "missing"
+    assert status.config_state == "missing"
+    assert status.model_provider is None
+    assert status.active_task is None
+
+
 def test_workspace_status_reports_config_and_active_task(tmp_path) -> None:
     forge_dir = tmp_path / ".forge"
     forge_dir.mkdir()

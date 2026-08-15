@@ -213,7 +213,7 @@ def _parse_config_setting(raw_value: str) -> str | None:
 
 def workspace_status(workspace: Path) -> WorkspaceStatus:
     workspace = Path(workspace)
-    workspace_ok = workspace.exists() and workspace.is_dir()
+    workspace_ok = not workspace.is_symlink() and workspace.exists() and workspace.is_dir()
     model_provider: str | None = None
     config_file_ok = False
     try:
