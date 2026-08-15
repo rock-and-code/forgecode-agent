@@ -171,6 +171,7 @@ class AgentController:
         )
 
     def _invalid_tool_arguments_result(self, message: AssistantMessage, iterations: int, tool_name: str) -> AgentRunResult:
+        self._redact_latest_tool_audit_events(tool_name)
         self.ledger.append(
             "tool_call_failed",
             {"tool": tool_name, "reason": "invalid_arguments"},
@@ -211,6 +212,22 @@ class AgentController:
             iterations=iterations,
             stop_reason="tool_error",
         )
+
+    def _redact_latest_tool_audit_events(self, tool_name: str) -> None:
+        found_requested = False
+        found_responded = False
+        for event in reversed(self.ledger.events):
+            if event.type == "tool_call_requested" and not found_requested:
+                if event.data.get("tool") == tool_name:
+                    event.data["arguments"] = REDACTED_VALUE
+                    found_requested = True
+            elif event.type == "model_responded" and not found_responded:
+                for intent in event.data.get("tool_intents", []):
+                    if intent.get("name") == tool_name:
+                        intent["arguments"] = REDACTED_VALUE
+                found_responded = True
+            if found_requested and found_responded:
+                return
 
     def _message_data(self, message: AssistantMessage) -> dict[str, Any]:
         return {

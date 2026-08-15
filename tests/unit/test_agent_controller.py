@@ -1020,3 +1020,46 @@ def test_agent_controller_stops_safely_when_tool_handler_raises_runtime_exceptio
         "completed": False,
         "stop_reason": "tool_error",
     }
+
+
+def test_agent_controller_redacts_known_invalid_arguments_from_audit_events(
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+    tmp_path: Path,
+) -> None:
+    secret_payload = "KNOWN_TOOL_INVALID_PAYLOAD_DO_NOT_LOG_4b7e9c21"
+    ledger = RunLedger(run_id="known-tool-invalid-arguments-redacted")
+    provider = FakeModelProvider(
+        script=[
+            AssistantMessage(
+                content="I need to inspect a sensitive path.",
+                tool_intents=[
+                    ToolIntent(
+                        name="read_file",
+                        arguments={"path": 123, "payload": secret_payload},
+                    )
+                ],
+            ),
+            AssistantMessage(content="This response must not be requested."),
+        ]
+    )
+    controller = AgentController(
+        model_provider=provider,
+        tools=read_only_registry.clone_empty_history(),
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+        max_iterations=1,
+    )
+
+    result = controller.run(goal="Read a sensitive path")
+    ledger_path = tmp_path / "ledger.jsonl"
+    ledger.write_jsonl(ledger_path)
+    serialized_ledger = ledger_path.read_text(encoding="utf-8")
+
+    assert result.stop_reason == "invalid_tool_arguments"
+    assert ledger.events[2].data == {
+        "content": "I need to inspect a sensitive path.",
+        "tool_intents": [{"name": "read_file", "arguments": "[REDACTED]"}],
+    }
+    assert ledger.events[3].data == {"tool": "read_file", "arguments": "[REDACTED]"}
+    assert secret_payload not in serialized_ledger
