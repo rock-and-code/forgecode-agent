@@ -170,7 +170,7 @@ def _update_config_from_descriptor(forge_descriptor: int, descriptor: int, key: 
             pass
 
 
-def _open_config_descriptor(workspace: Path, access: int) -> tuple[int, int]:
+def _open_forge_file_descriptor(workspace: Path, filename: str, access: int) -> tuple[int, int]:
     nofollow = getattr(os, "O_NOFOLLOW", None)
     if nofollow is None:
         raise OSError("no-follow traversal is unavailable")
@@ -189,11 +189,15 @@ def _open_config_descriptor(workspace: Path, access: int) -> tuple[int, int]:
     os.close(workspace_descriptor)
     try:
         nonblock = getattr(os, "O_NONBLOCK", 0)
-        descriptor = os.open("config.toml", access | nofollow | nonblock, dir_fd=forge_descriptor)
+        descriptor = os.open(filename, access | nofollow | nonblock, dir_fd=forge_descriptor)
     except OSError:
         os.close(forge_descriptor)
         raise
     return forge_descriptor, descriptor
+
+
+def _open_config_descriptor(workspace: Path, access: int) -> tuple[int, int]:
+    return _open_forge_file_descriptor(workspace, "config.toml", access)
 
 
 def _parse_config_setting(raw_value: str) -> str | None:
@@ -210,25 +214,50 @@ def _parse_config_setting(raw_value: str) -> str | None:
 def workspace_status(workspace: Path) -> WorkspaceStatus:
     workspace = Path(workspace)
     workspace_ok = workspace.exists() and workspace.is_dir()
-    forge_dir = workspace / ".forge"
-    config_file = forge_dir / "config.toml"
-    active_task_file = forge_dir / "active-task.toml"
-
     model_provider: str | None = None
-    config_file_ok = config_file.is_file()
-    if config_file_ok:
+    config_file_ok = False
+    try:
+        forge_descriptor, config_descriptor = _open_forge_file_descriptor(
+            workspace, "config.toml", os.O_RDONLY
+        )
+    except OSError:
+        pass
+    else:
         try:
-            config = _read_simple_toml_strings(config_file)
+            if stat.S_ISREG(os.fstat(config_descriptor).st_mode):
+                config_file_ok = True
+                descriptor = config_descriptor
+                config_descriptor = -1
+                config = _read_simple_toml_strings_from_descriptor(descriptor)
+                model_provider = config.get("model_provider")
         except (OSError, UnicodeDecodeError):
-            config = {}
-        model_provider = config.get("model_provider")
+            pass
+        finally:
+            if config_descriptor != -1:
+                os.close(config_descriptor)
+            os.close(forge_descriptor)
 
     active_task: str | None = None
-    if active_task_file.is_file():
+    try:
+        forge_descriptor, active_task_descriptor = _open_forge_file_descriptor(
+            workspace, "active-task.toml", os.O_RDONLY
+        )
+    except OSError:
+        pass
+    else:
         try:
-            task = _read_simple_toml_strings(active_task_file)
+            if not stat.S_ISREG(os.fstat(active_task_descriptor).st_mode):
+                task = {}
+            else:
+                descriptor = active_task_descriptor
+                active_task_descriptor = -1
+                task = _read_simple_toml_strings_from_descriptor(descriptor)
         except (OSError, UnicodeDecodeError):
             task = {}
+        finally:
+            if active_task_descriptor != -1:
+                os.close(active_task_descriptor)
+            os.close(forge_descriptor)
         task_name = task.get("name")
         task_path = task.get("path")
         if task_name and task_path:

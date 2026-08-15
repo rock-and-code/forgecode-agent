@@ -46,6 +46,25 @@ def test_workspace_status_reports_config_and_active_task(tmp_path) -> None:
     assert status.active_task == "Build status (tasks/001-build-status.md)"
 
 
+def test_workspace_status_refuses_symlinked_forge_directory(tmp_path) -> None:
+    target_forge_dir = tmp_path / "target-forge"
+    target_forge_dir.mkdir()
+    (target_forge_dir / "config.toml").write_text(
+        'model_provider = "fake"\n', encoding="utf-8"
+    )
+    (target_forge_dir / "active-task.toml").write_text(
+        'name = "Should not be read"\npath = "tasks/secret.md"\n', encoding="utf-8"
+    )
+    (tmp_path / ".forge").symlink_to(target_forge_dir, target_is_directory=True)
+
+    status = workspace_status(tmp_path)
+
+    assert status.workspace_state == "ok"
+    assert status.config_state == "missing"
+    assert status.model_provider is None
+    assert status.active_task is None
+
+
 def test_workspace_status_ignores_invalid_utf8_config(tmp_path) -> None:
     forge_dir = tmp_path / ".forge"
     forge_dir.mkdir()
