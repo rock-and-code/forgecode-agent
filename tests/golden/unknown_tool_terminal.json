@@ -1,0 +1,61 @@
+[
+  {
+    "data": {
+      "goal": "Use a missing tool"
+    },
+    "type": "run_started"
+  },
+  {
+    "data": {
+      "messages": [
+        {
+          "content": "Use a missing tool",
+          "role": "user"
+        }
+      ]
+    },
+    "type": "model_requested"
+  },
+  {
+    "data": {
+      "content": "I need a missing tool.",
+      "tool_intents": [
+        {
+          "arguments": "[REDACTED]",
+          "name": "missing_tool"
+        }
+      ]
+    },
+    "type": "model_responded"
+  },
+  {
+    "data": {
+      "arguments": "[REDACTED]",
+      "tool": "missing_tool"
+    },
+    "type": "tool_call_requested"
+  },
+  {
+    "data": {
+      "allowed": false,
+      "reason": "unknown_tool",
+      "tool": "missing_tool"
+    },
+    "type": "policy_decision"
+  },
+  {
+    "data": {
+      "reason": "unknown_tool",
+      "tool": "missing_tool"
+    },
+    "type": "tool_call_failed"
+  },
+  {
+    "data": {
+      "completed": false,
+      "final_answer": "I need a missing tool.",
+      "stop_reason": "unknown_tool"
+    },
+    "type": "run_completed"
+  }
+]

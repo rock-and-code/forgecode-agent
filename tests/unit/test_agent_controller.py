@@ -485,6 +485,40 @@ def test_agent_controller_model_error_terminal_path_matches_golden_transcript(
     assert actual_transcript == golden_transcript
 
 
+def test_agent_controller_unknown_tool_terminal_path_matches_golden_transcript(
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    ledger = RunLedger(run_id="unknown-tool-terminal")
+    provider = FakeModelProvider(
+        script=[
+            AssistantMessage(
+                content="I need a missing tool.",
+                tool_intents=[ToolIntent(name="missing_tool", arguments={"path": "README.md"})],
+            ),
+            AssistantMessage(content="This response must not be requested."),
+        ]
+    )
+    registry = read_only_registry.clone_empty_history()
+    controller = AgentController(
+        model_provider=provider,
+        tools=registry,
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+        max_iterations=1,
+    )
+
+    controller.run(goal="Use a missing tool")
+
+    actual_transcript = [event.to_dict(exclude={"timestamp"}) for event in ledger.events]
+    golden_transcript = json.loads(
+        (GOLDEN_DIR / "unknown_tool_terminal.json").read_text(encoding="utf-8")
+    )
+    assert actual_transcript == golden_transcript
+    assert registry.calls == []
+    assert len(provider.requests) == 1
+
+
 def test_agent_controller_multiple_tool_calls_terminal_path_matches_golden_transcript(
     read_only_registry: ToolRegistry,
     auto_read_policy: ApprovalPolicy,
