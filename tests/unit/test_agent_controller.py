@@ -460,6 +460,31 @@ def test_agent_controller_model_error_normalizes_provider_failure_after_safe_res
     assert all("sensitive details" not in str(event.data) for event in ledger.events)
 
 
+def test_agent_controller_model_error_terminal_path_matches_golden_transcript(
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    class FailingProvider:
+        def complete(self, *, messages: list[dict[str, object]]) -> AssistantMessage:
+            raise RuntimeError("deterministic provider failure")
+
+    ledger = RunLedger(run_id="model-error-terminal")
+    controller = AgentController(
+        model_provider=FailingProvider(),
+        tools=read_only_registry.clone_empty_history(),
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+    )
+
+    controller.run(goal="Read README.md")
+
+    actual_transcript = [event.to_dict(exclude={"timestamp"}) for event in ledger.events]
+    golden_transcript = json.loads(
+        (GOLDEN_DIR / "model_error_terminal.json").read_text(encoding="utf-8")
+    )
+    assert actual_transcript == golden_transcript
+
+
 def test_agent_controller_multiple_tool_calls_terminal_path_matches_golden_transcript(
     read_only_registry: ToolRegistry,
     auto_read_policy: ApprovalPolicy,
