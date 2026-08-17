@@ -519,6 +519,49 @@ def test_agent_controller_unknown_tool_terminal_path_matches_golden_transcript(
     assert len(provider.requests) == 1
 
 
+def test_agent_controller_invalid_tool_arguments_terminal_path_matches_golden_transcript(
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    ledger = RunLedger(run_id="invalid-tool-arguments-golden")
+    provider = FakeModelProvider(
+        script=[
+            AssistantMessage(
+                content="I need to inspect a file.",
+                tool_intents=[
+                    ToolIntent(
+                        name="read_file",
+                        arguments={
+                            "path": 42,
+                            "sensitive_payload": "do-not-log-this-token",
+                        },
+                    )
+                ],
+            ),
+            AssistantMessage(content="This response must not be requested."),
+        ]
+    )
+    controller = AgentController(
+        model_provider=provider,
+        tools=read_only_registry.clone_empty_history(),
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+        max_iterations=1,
+    )
+
+    result = controller.run(goal="Read a file")
+
+    assert result.completed is False
+    assert result.stop_reason == "invalid_tool_arguments"
+    assert len(provider.requests) == 1
+    actual_transcript = [event.to_dict(exclude={"timestamp"}) for event in ledger.events]
+    golden_transcript = json.loads(
+        (GOLDEN_DIR / "invalid_tool_arguments_terminal.json").read_text(encoding="utf-8")
+    )
+    assert actual_transcript == golden_transcript
+    assert all("do-not-log-this-token" not in str(event) for event in actual_transcript)
+
+
 def test_agent_controller_tool_error_terminal_path_matches_golden_transcript(
     auto_read_policy: ApprovalPolicy,
 ) -> None:
