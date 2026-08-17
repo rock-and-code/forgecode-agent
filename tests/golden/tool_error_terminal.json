@@ -1,0 +1,67 @@
+[
+  {
+    "data": {
+      "goal": "Read README.md"
+    },
+    "type": "run_started"
+  },
+  {
+    "data": {
+      "messages": [
+        {
+          "content": "Read README.md",
+          "role": "user"
+        }
+      ]
+    },
+    "type": "model_requested"
+  },
+  {
+    "data": {
+      "content": "I need to inspect README.md.",
+      "tool_intents": [
+        {
+          "arguments": {
+            "path": "README.md"
+          },
+          "name": "read_file"
+        }
+      ]
+    },
+    "type": "model_responded"
+  },
+  {
+    "data": {
+      "arguments": {
+        "path": "README.md"
+      },
+      "tool": "read_file"
+    },
+    "type": "tool_call_requested"
+  },
+  {
+    "data": {
+      "allowed": true,
+      "reason": "auto_allowed_read_only",
+      "tool": "read_file"
+    },
+    "type": "policy_decision"
+  },
+  {
+    "data": {
+      "error": "tool execution failed",
+      "error_type": "RuntimeError",
+      "reason": "tool_error",
+      "tool": "read_file"
+    },
+    "type": "tool_call_failed"
+  },
+  {
+    "data": {
+      "completed": false,
+      "final_answer": "I need to inspect README.md.",
+      "stop_reason": "tool_error"
+    },
+    "type": "run_completed"
+  }
+]
