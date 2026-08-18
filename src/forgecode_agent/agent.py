@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
 from forgecode_agent.ledger import REDACTED_VALUE, RunLedger
-from forgecode_agent.models import AssistantMessage
+from forgecode_agent.models import AssistantMessage, ToolIntent
 from forgecode_agent.policy import ApprovalPolicy
 from forgecode_agent.tools import ToolCallDenied, ToolExecutionError, ToolRegistry
 
@@ -41,6 +42,18 @@ class AgentController:
                 response = self.model_provider.complete(messages=messages)
             except Exception as exc:
                 self.ledger.append("model_error", {"error_type": type(exc).__name__})
+                self.ledger.append(
+                    "run_completed",
+                    {"final_answer": last_answer, "completed": False, "stop_reason": "model_error"},
+                )
+                return AgentRunResult(
+                    final_answer=last_answer,
+                    completed=False,
+                    iterations=iterations,
+                    stop_reason="model_error",
+                )
+            if not self._is_valid_model_response(response):
+                self.ledger.append("model_error", {"error_type": "MalformedModelResponse"})
                 self.ledger.append(
                     "run_completed",
                     {"final_answer": last_answer, "completed": False, "stop_reason": "model_error"},
@@ -240,6 +253,54 @@ class AgentController:
                 for intent in message.tool_intents
             ],
         }
+
+    @staticmethod
+    def _is_valid_model_response(response: object) -> bool:
+        if not (
+            isinstance(response, AssistantMessage)
+            and isinstance(response.content, str)
+            and isinstance(response.tool_intents, list)
+        ):
+            return False
+        for intent in response.tool_intents:
+            if not (
+                isinstance(intent, ToolIntent)
+                and isinstance(intent.name, str)
+                and isinstance(intent.arguments, dict)
+            ):
+                return False
+            if not AgentController._has_string_dict_keys(intent.arguments):
+                return False
+            try:
+                json.dumps(intent.arguments, allow_nan=False)
+            except (RecursionError, TypeError, ValueError):
+                return False
+        return True
+
+    @staticmethod
+    def _has_string_dict_keys(value: object) -> bool:
+        active_containers: set[int] = set()
+        pending: list[tuple[object, bool]] = [(value, False)]
+        while pending:
+            current, exiting = pending.pop()
+            if not isinstance(current, (dict, list, tuple)):
+                continue
+            container_id = id(current)
+            if exiting:
+                active_containers.remove(container_id)
+                continue
+            if container_id in active_containers:
+                return False
+            active_containers.add(container_id)
+            pending.append((current, True))
+            if isinstance(current, dict):
+                for key, item in reversed(list(current.items())):
+                    if not isinstance(key, str):
+                        return False
+                    pending.append((item, False))
+            else:
+                pending.extend((item, False) for item in reversed(current))
+        return True
 
     def _tool_call_requested_data(self, tool_name: str, arguments: Any) -> dict[str, Any]:
         if self.tools.get(tool_name) is None:

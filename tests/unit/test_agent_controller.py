@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -461,6 +462,207 @@ def test_agent_controller_model_error_normalizes_provider_failure_after_safe_res
     assert all("sensitive details" not in str(event.data) for event in ledger.events)
 
 
+@pytest.mark.parametrize(
+    "malformed_response",
+    [
+        cast(Any, AssistantMessage(content=object())),
+        cast(Any, AssistantMessage(tool_intents=())),
+        cast(Any, AssistantMessage(tool_intents=[object()])),
+        cast(Any, AssistantMessage(tool_intents=[ToolIntent(name=object(), arguments={})])),
+        cast(Any, AssistantMessage(tool_intents=[ToolIntent(name="read_file", arguments={"path": object()})])),
+        None,
+        object(),
+    ],
+)
+def test_agent_controller_normalizes_malformed_assistant_messages_and_tool_intents(
+    malformed_response: object,
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    class MalformedProvider:
+        def complete(self, *, messages: list[dict[str, object]]) -> object:
+            return malformed_response
+
+    ledger = RunLedger(run_id="malformed-assistant-message")
+    registry = read_only_registry.clone_empty_history()
+    controller = AgentController(
+        model_provider=MalformedProvider(),
+        tools=registry,
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+    )
+
+    result = controller.run(goal="Answer safely")
+
+    assert result.final_answer == "Answer safely"
+    assert result.completed is False
+    assert result.iterations == 0
+    assert result.stop_reason == "model_error"
+    assert registry.calls == []
+    assert [event.type for event in ledger.events] == ["run_started", "model_requested", "model_error", "run_completed"]
+    assert ledger.events[-2].data == {"error_type": "MalformedModelResponse"}
+    assert all("object at" not in str(event.data) for event in ledger.events)
+
+
+def test_agent_controller_rejects_json_safe_non_dict_tool_arguments(
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    class MalformedProvider:
+        def complete(self, *, messages: list[dict[str, object]]) -> AssistantMessage:
+            return AssistantMessage(
+                content="Unsafe tool request.",
+                tool_intents=[ToolIntent(name="read_file", arguments=cast(Any, ("README.md",)))],
+            )
+
+    ledger = RunLedger(run_id="non-dict-tool-arguments")
+    registry = read_only_registry.clone_empty_history()
+    controller = AgentController(
+        model_provider=MalformedProvider(),
+        tools=registry,
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+    )
+
+    result = controller.run(goal="Answer safely")
+
+    assert result.final_answer == "Answer safely"
+    assert result.completed is False
+    assert result.iterations == 0
+    assert result.stop_reason == "model_error"
+    assert registry.calls == []
+    assert [event.type for event in ledger.events] == ["run_started", "model_requested", "model_error", "run_completed"]
+    assert ledger.events[-2].data == {"error_type": "MalformedModelResponse"}
+
+
+def test_agent_controller_rejects_cyclic_tool_arguments_as_model_error(
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    cyclic_arguments: dict[str, Any] = {}
+    cyclic_arguments["self"] = cyclic_arguments
+
+    class MalformedProvider:
+        def complete(self, *, messages: list[dict[str, object]]) -> AssistantMessage:
+            return AssistantMessage(
+                content="Cyclic tool request.",
+                tool_intents=[ToolIntent(name="read_file", arguments=cast(Any, cyclic_arguments))],
+            )
+
+    ledger = RunLedger(run_id="cyclic-tool-arguments")
+    registry = read_only_registry.clone_empty_history()
+    controller = AgentController(
+        model_provider=MalformedProvider(),
+        tools=registry,
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+    )
+
+    result = controller.run(goal="Answer safely")
+
+    assert result.final_answer == "Answer safely"
+    assert result.completed is False
+    assert result.iterations == 0
+    assert result.stop_reason == "model_error"
+    assert registry.calls == []
+    assert [event.type for event in ledger.events] == ["run_started", "model_requested", "model_error", "run_completed"]
+    assert ledger.events[-2].data == {"error_type": "MalformedModelResponse"}
+
+
+def test_agent_controller_rejects_nested_non_string_tool_argument_keys(
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    class MalformedProvider:
+        def complete(self, *, messages: list[dict[str, object]]) -> AssistantMessage:
+            return AssistantMessage(
+                content="Unsafe nested tool request.",
+                tool_intents=[
+                    ToolIntent(
+                        name="read_file",
+                        arguments=cast(Any, {"options": {1: "unexpected"}}),
+                    )
+                ],
+            )
+
+    ledger = RunLedger(run_id="nested-non-string-tool-argument-key")
+    registry = read_only_registry.clone_empty_history()
+    controller = AgentController(
+        model_provider=MalformedProvider(),
+        tools=registry,
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+    )
+
+    result = controller.run(goal="Answer safely")
+
+    assert result.final_answer == "Answer safely"
+    assert result.completed is False
+    assert result.iterations == 0
+    assert result.stop_reason == "model_error"
+    assert registry.calls == []
+    assert [event.type for event in ledger.events] == ["run_started", "model_requested", "model_error", "run_completed"]
+    assert ledger.events[-2].data == {"error_type": "MalformedModelResponse"}
+
+
+@pytest.mark.parametrize("malformed_response", [None, object()])
+def test_agent_controller_normalizes_malformed_model_response(
+    malformed_response: object,
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    class MalformedProvider:
+        def __init__(self) -> None:
+            self.requests: list[dict[str, object]] = []
+
+        def complete(self, *, messages: list[dict[str, object]]) -> object:
+            self.requests.append({"messages": messages})
+            if len(self.requests) == 1:
+                return AssistantMessage(
+                    content="Safe answer before malformed response.",
+                    tool_intents=[ToolIntent(name="read_file", arguments={"path": "README.md"})],
+                )
+            return malformed_response
+
+    ledger = RunLedger(run_id="malformed-model-response")
+    provider = MalformedProvider()
+    registry = read_only_registry.clone_empty_history()
+    controller = AgentController(
+        model_provider=provider,
+        tools=registry,
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+    )
+
+    result = controller.run(goal="Answer safely")
+
+    assert result.final_answer == "Safe answer before malformed response."
+    assert result.completed is False
+    assert result.iterations == 1
+    assert result.stop_reason == "model_error"
+    assert len(provider.requests) == 2
+    assert registry.calls == [{"tool": "read_file", "arguments": {"path": "README.md"}, "status": "completed"}]
+    assert [event.type for event in ledger.events] == [
+        "run_started",
+        "model_requested",
+        "model_responded",
+        "tool_call_requested",
+        "policy_decision",
+        "tool_call_completed",
+        "model_requested",
+        "model_error",
+        "run_completed",
+    ]
+    assert ledger.events[-2].data == {"error_type": "MalformedModelResponse"}
+    assert ledger.events[-1].data == {
+        "final_answer": "Safe answer before malformed response.",
+        "completed": False,
+        "stop_reason": "model_error",
+    }
+    assert all(malformed_response is not value for event in ledger.events for value in event.data.values())
+    assert all("MalformedProvider" not in str(event.data) for event in ledger.events)
+
+
 def test_agent_controller_model_error_terminal_path_matches_golden_transcript(
     read_only_registry: ToolRegistry,
     auto_read_policy: ApprovalPolicy,
@@ -600,21 +802,15 @@ def test_agent_controller_malformed_non_dict_tool_arguments_terminal_path_matche
 
     result = controller.run(goal="Read a file")
 
+    assert result.final_answer == "Read a file"
     assert result.completed is False
-    assert result.stop_reason == "invalid_tool_arguments"
-    assert registry.calls == [{
-        "tool": "read_file",
-        "arguments": None,
-        "status": "denied",
-        "reason": "invalid_arguments",
-    }]
+    assert result.iterations == 0
+    assert result.stop_reason == "model_error"
+    assert registry.calls == []
     assert handler_calls == []
     assert len(provider.requests) == 1
-    actual_transcript = [event.to_dict(exclude={"timestamp"}) for event in ledger.events]
-    golden_transcript = json.loads(
-        (GOLDEN_DIR / "malformed_non_dict_tool_arguments_terminal.json").read_text(encoding="utf-8")
-    )
-    assert actual_transcript == golden_transcript
+    assert [event.type for event in ledger.events] == ["run_started", "model_requested", "model_error", "run_completed"]
+    assert ledger.events[-2].data == {"error_type": "MalformedModelResponse"}
 
 
 def test_agent_controller_tool_error_terminal_path_matches_golden_transcript(
@@ -828,32 +1024,14 @@ def test_agent_controller_stops_safely_for_unknown_tools_with_non_dict_arguments
 
     result = controller.run(goal="Use a missing tool with malformed arguments")
 
-    assert result.final_answer == "I need a missing tool with malformed arguments."
+    assert result.final_answer == "Use a missing tool with malformed arguments"
     assert result.completed is False
-    assert result.iterations == 1
-    assert result.stop_reason == "unknown_tool"
+    assert result.iterations == 0
+    assert result.stop_reason == "model_error"
     assert registry.calls == []
     assert len(provider.requests) == 1
-    assert [event.type for event in ledger.events] == [
-        "run_started",
-        "model_requested",
-        "model_responded",
-        "tool_call_requested",
-        "policy_decision",
-        "tool_call_failed",
-        "run_completed",
-    ]
-    assert ledger.events[4].data == {
-        "tool": "missing_tool",
-        "allowed": False,
-        "reason": "unknown_tool",
-    }
-    assert ledger.events[5].data == {"tool": "missing_tool", "reason": "unknown_tool"}
-    assert ledger.events[-1].data == {
-        "final_answer": "I need a missing tool with malformed arguments.",
-        "completed": False,
-        "stop_reason": "unknown_tool",
-    }
+    assert [event.type for event in ledger.events] == ["run_started", "model_requested", "model_error", "run_completed"]
+    assert ledger.events[-2].data == {"error_type": "MalformedModelResponse"}
 
 
 def test_agent_controller_stops_safely_when_non_read_only_tool_arguments_are_not_a_dict(
@@ -894,30 +1072,15 @@ def test_agent_controller_stops_safely_when_non_read_only_tool_arguments_are_not
 
     result = controller.run(goal="Run ls")
 
-    assert result.final_answer == "I need to run a command."
+    assert result.final_answer == "Run ls"
     assert result.completed is False
-    assert result.iterations == 1
-    assert result.stop_reason == "invalid_tool_arguments"
+    assert result.iterations == 0
+    assert result.stop_reason == "model_error"
     assert handler_calls == []
     assert len(provider.requests) == 1
-    assert registry.calls == [
-        {"tool": "run_shell", "arguments": 123, "status": "denied", "reason": "invalid_arguments"}
-    ]
-    assert [event.type for event in ledger.events] == [
-        "run_started",
-        "model_requested",
-        "model_responded",
-        "tool_call_requested",
-        "policy_decision",
-        "tool_call_failed",
-        "run_completed",
-    ]
-    assert ledger.events[5].data == {"tool": "run_shell", "reason": "invalid_arguments"}
-    assert ledger.events[-1].data == {
-        "final_answer": "I need to run a command.",
-        "completed": False,
-        "stop_reason": "invalid_tool_arguments",
-    }
+    assert registry.calls == []
+    assert [event.type for event in ledger.events] == ["run_started", "model_requested", "model_error", "run_completed"]
+    assert ledger.events[-2].data == {"error_type": "MalformedModelResponse"}
 
 
 def test_agent_controller_stops_safely_when_supervised_policy_denies_known_shell_tool(
