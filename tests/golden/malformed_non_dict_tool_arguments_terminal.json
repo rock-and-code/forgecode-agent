@@ -1,0 +1,61 @@
+[
+  {
+    "type": "run_started",
+    "data": {
+      "goal": "Read a file"
+    }
+  },
+  {
+    "type": "model_requested",
+    "data": {
+      "messages": [
+        {
+          "role": "user",
+          "content": "Read a file"
+        }
+      ]
+    }
+  },
+  {
+    "type": "model_responded",
+    "data": {
+      "content": "I need to inspect a file.",
+      "tool_intents": [
+        {
+          "name": "read_file",
+          "arguments": "[REDACTED]"
+        }
+      ]
+    }
+  },
+  {
+    "type": "tool_call_requested",
+    "data": {
+      "tool": "read_file",
+      "arguments": "[REDACTED]"
+    }
+  },
+  {
+    "type": "policy_decision",
+    "data": {
+      "tool": "read_file",
+      "allowed": false,
+      "reason": "invalid_arguments"
+    }
+  },
+  {
+    "type": "tool_call_failed",
+    "data": {
+      "tool": "read_file",
+      "reason": "invalid_arguments"
+    }
+  },
+  {
+    "type": "run_completed",
+    "data": {
+      "final_answer": "I need to inspect a file.",
+      "completed": false,
+      "stop_reason": "invalid_tool_arguments"
+    }
+  }
+]

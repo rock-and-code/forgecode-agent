@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -560,6 +561,60 @@ def test_agent_controller_invalid_tool_arguments_terminal_path_matches_golden_tr
     )
     assert actual_transcript == golden_transcript
     assert all("do-not-log-this-token" not in str(event) for event in actual_transcript)
+
+
+def test_agent_controller_malformed_non_dict_tool_arguments_terminal_path_matches_golden_transcript(
+    read_file_tool: ToolDefinition,
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    handler_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def read_file_handler(*args: object, **kwargs: object) -> None:
+        handler_calls.append((args, kwargs))
+
+    read_only_registry.register(replace(read_file_tool, handler=read_file_handler))
+    ledger = RunLedger(run_id="malformed-tool-arguments-golden")
+    provider = FakeModelProvider(
+        script=[
+            AssistantMessage(
+                content="I need to inspect a file.",
+                tool_intents=[
+                    ToolIntent(
+                        name="read_file",
+                        arguments=None,  # type: ignore[arg-type]
+                    )
+                ],
+            ),
+            AssistantMessage(content="This response must not be requested."),
+        ]
+    )
+    registry = read_only_registry.clone_empty_history()
+    controller = AgentController(
+        model_provider=provider,
+        tools=registry,
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+        max_iterations=1,
+    )
+
+    result = controller.run(goal="Read a file")
+
+    assert result.completed is False
+    assert result.stop_reason == "invalid_tool_arguments"
+    assert registry.calls == [{
+        "tool": "read_file",
+        "arguments": None,
+        "status": "denied",
+        "reason": "invalid_arguments",
+    }]
+    assert handler_calls == []
+    assert len(provider.requests) == 1
+    actual_transcript = [event.to_dict(exclude={"timestamp"}) for event in ledger.events]
+    golden_transcript = json.loads(
+        (GOLDEN_DIR / "malformed_non_dict_tool_arguments_terminal.json").read_text(encoding="utf-8")
+    )
+    assert actual_transcript == golden_transcript
 
 
 def test_agent_controller_tool_error_terminal_path_matches_golden_transcript(
