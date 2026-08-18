@@ -688,6 +688,37 @@ def test_agent_controller_model_error_terminal_path_matches_golden_transcript(
     assert actual_transcript == golden_transcript
 
 
+def test_agent_controller_malformed_successful_response_terminal_path_matches_golden_transcript(
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    class MalformedProvider:
+        def complete(self, *, messages: list[dict[str, object]]) -> object:
+            return object()
+
+    ledger = RunLedger(run_id="malformed-model-response-terminal")
+    registry = read_only_registry.clone_empty_history()
+    controller = AgentController(
+        model_provider=MalformedProvider(),
+        tools=registry,
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+    )
+
+    result = controller.run(goal="Read README.md")
+
+    assert result.final_answer == "Read README.md"
+    assert result.completed is False
+    assert result.stop_reason == "model_error"
+    assert registry.calls == []
+    actual_transcript = [event.to_dict(exclude={"timestamp"}) for event in ledger.events]
+    golden_transcript = json.loads(
+        (GOLDEN_DIR / "malformed_model_response_terminal.json").read_text(encoding="utf-8")
+    )
+    assert actual_transcript == golden_transcript
+    assert "tool_call_requested" not in [event["type"] for event in actual_transcript]
+
+
 def test_agent_controller_unknown_tool_terminal_path_matches_golden_transcript(
     read_only_registry: ToolRegistry,
     auto_read_policy: ApprovalPolicy,

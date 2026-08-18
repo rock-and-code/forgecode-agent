@@ -1,0 +1,33 @@
+[
+  {
+    "data": {
+      "goal": "Read README.md"
+    },
+    "type": "run_started"
+  },
+  {
+    "data": {
+      "messages": [
+        {
+          "content": "Read README.md",
+          "role": "user"
+        }
+      ]
+    },
+    "type": "model_requested"
+  },
+  {
+    "data": {
+      "error_type": "MalformedModelResponse"
+    },
+    "type": "model_error"
+  },
+  {
+    "data": {
+      "completed": false,
+      "final_answer": "Read README.md",
+      "stop_reason": "model_error"
+    },
+    "type": "run_completed"
+  }
+]
