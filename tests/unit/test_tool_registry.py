@@ -2340,6 +2340,41 @@ def test_tool_registry_allows_unique_array_items_when_unique_items_true() -> Non
     ]
 
 
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        [{"count": 1}, {"count": 1.0}],
+        [[{"count": 1}], [{"count": 1.0}]],
+    ],
+)
+def test_tool_registry_denies_json_equal_duplicate_nested_array_items(arguments: list[object]) -> None:
+    calls: list[list[object]] = []
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_process",
+            risk="read_only",
+            description="Process nested values.",
+            parameters={"type": "array", "items": {}, "uniqueItems": True},
+            handler=lambda values: calls.append(values),
+        )
+    )
+
+    with pytest.raises(ToolCallDenied, match="invalid_arguments"):
+        registry.execute("batch_process", arguments)
+
+    assert calls == []
+    assert registry.calls == [
+        {
+            "tool": "batch_process",
+            "arguments": arguments,
+            "status": "denied",
+            "reason": "invalid_arguments",
+        }
+    ]
+
+
 def test_tool_registry_denies_array_without_item_matching_contains_before_handler_runs() -> None:
     calls: list[list[str]] = []
 

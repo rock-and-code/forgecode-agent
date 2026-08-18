@@ -590,6 +590,13 @@ def _value_matches_type(value: Any, expected_type: Any) -> bool:
 
 
 def _value_matches_const(value: Any, const: Any) -> bool:
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and isinstance(const, (int, float))
+        and not isinstance(const, bool)
+    ):
+        return value == const
     if type(value) is not type(const):
         return False
     if isinstance(value, dict):
