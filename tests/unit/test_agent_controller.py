@@ -408,6 +408,44 @@ def test_agent_controller_stops_without_tool_execution_when_model_returns_multip
     }
 
 
+def test_agent_controller_multiple_tool_calls_matches_golden_transcript(
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    ledger = RunLedger(run_id="multiple-tool-calls")
+    provider = FakeModelProvider(
+        script=[
+            AssistantMessage(
+                content="I need two tools.",
+                tool_intents=[
+                    ToolIntent(name="read_file", arguments={"path": "README.md"}),
+                    ToolIntent(name="read_file", arguments={"path": "pyproject.toml"}),
+                ],
+            )
+        ]
+    )
+    registry = read_only_registry.clone_empty_history()
+    controller = AgentController(
+        model_provider=provider,
+        tools=registry,
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+        max_iterations=1,
+    )
+
+    result = controller.run(goal="Read README.md and pyproject.toml")
+
+    assert result.stop_reason == "multiple_tool_calls"
+    assert result.iterations == 0
+    assert registry.calls == []
+    actual_transcript = [event.to_dict(exclude={"timestamp"}) for event in ledger.events]
+    golden_transcript = json.loads(
+        (GOLDEN_DIR / "multiple_tool_calls_terminal.json").read_text(encoding="utf-8")
+    )
+    assert actual_transcript == golden_transcript
+    assert "tool_call_requested" not in [event["type"] for event in actual_transcript]
+
+
 def test_agent_controller_model_error_normalizes_provider_failure_after_safe_response(
     read_only_registry: ToolRegistry,
     auto_read_policy: ApprovalPolicy,
