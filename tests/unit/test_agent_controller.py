@@ -882,6 +882,45 @@ def test_agent_controller_malformed_non_dict_tool_arguments_terminal_path_matche
     assert ledger.events[-2].data == {"error_type": "MalformedModelResponse"}
 
 
+def test_agent_controller_cyclic_tool_arguments_terminal_path_matches_golden_transcript(
+    read_only_registry: ToolRegistry,
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    cyclic_arguments: dict[str, object] = {}
+    cyclic_arguments["self"] = cyclic_arguments
+    ledger = RunLedger(run_id="cyclic-tool-arguments-terminal")
+    provider = FakeModelProvider(
+        script=[
+            AssistantMessage(
+                content="I need to inspect README.md.",
+                tool_intents=[ToolIntent(name="read_file", arguments=cyclic_arguments)],
+            ),
+            AssistantMessage(content="This response must not be requested."),
+        ]
+    )
+    registry = read_only_registry.clone_empty_history()
+    controller = AgentController(
+        model_provider=provider,
+        tools=registry,
+        approval_policy=auto_read_policy,
+        ledger=ledger,
+        max_iterations=1,
+    )
+
+    result = controller.run(goal="Read README.md")
+
+    assert result.final_answer == "Read README.md"
+    assert result.completed is False
+    assert result.stop_reason == "model_error"
+    assert registry.calls == []
+    actual_transcript = [event.to_dict(exclude={"timestamp"}) for event in ledger.events]
+    golden_transcript = json.loads(
+        (GOLDEN_DIR / "cyclic_tool_arguments_terminal.json").read_text(encoding="utf-8")
+    )
+    assert actual_transcript == golden_transcript
+    assert "tool_call_requested" not in [event["type"] for event in actual_transcript]
+
+
 def test_agent_controller_tool_error_terminal_path_matches_golden_transcript(
     auto_read_policy: ApprovalPolicy,
 ) -> None:
