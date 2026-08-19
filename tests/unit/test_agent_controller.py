@@ -880,6 +880,11 @@ def test_agent_controller_malformed_non_dict_tool_arguments_terminal_path_matche
     assert len(provider.requests) == 1
     assert [event.type for event in ledger.events] == ["run_started", "model_requested", "model_error", "run_completed"]
     assert ledger.events[-2].data == {"error_type": "MalformedModelResponse"}
+    actual_transcript = [event.to_dict(exclude={"timestamp"}) for event in ledger.events]
+    golden_transcript = json.loads(
+        (GOLDEN_DIR / "malformed_non_dict_tool_arguments_terminal.json").read_text(encoding="utf-8")
+    )
+    assert actual_transcript == golden_transcript
 
 
 def test_agent_controller_cyclic_tool_arguments_terminal_path_matches_golden_transcript(
