@@ -1196,6 +1196,58 @@ def test_agent_controller_stops_safely_when_non_read_only_tool_arguments_are_not
     assert ledger.events[-2].data == {"error_type": "MalformedModelResponse"}
 
 
+def test_agent_controller_non_read_only_tool_non_dict_arguments_matches_golden_transcript(
+    auto_read_policy: ApprovalPolicy,
+) -> None:
+    handler_calls: list[dict[str, object]] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="run_shell",
+            risk="shell",
+            description="Run a shell command.",
+            parameters={
+                "type": "object",
+                "required": ["command"],
+                "properties": {"command": {"type": "string"}},
+            },
+            handler=lambda command: handler_calls.append({"command": command}),
+        )
+    )
+    ledger = RunLedger(run_id="malformed-non-readonly-tool-arguments-golden")
+    provider = FakeModelProvider(
+        script=[
+            AssistantMessage(
+                content="I need to run a command.",
+                tool_intents=[ToolIntent(name="run_shell", arguments=cast(Any, 123))],
+            ),
+            AssistantMessage(content="This response must not be requested."),
+        ]
+    )
+    controller = AgentController(
+        model_provider=provider,
+        tools=registry,
+        approval_policy=ApprovalPolicy(mode=auto_read_policy.mode, approved_actions={"run_shell:ls"}),
+        ledger=ledger,
+        max_iterations=1,
+    )
+
+    result = controller.run(goal="Run ls")
+
+    assert result.final_answer == "Run ls"
+    assert result.completed is False
+    assert result.iterations == 0
+    assert result.stop_reason == "model_error"
+    assert handler_calls == []
+    assert registry.calls == []
+    assert len(provider.requests) == 1
+    actual_transcript = [event.to_dict(exclude={"timestamp"}) for event in ledger.events]
+    golden_transcript = json.loads(
+        (GOLDEN_DIR / "malformed_non_readonly_tool_arguments_terminal.json").read_text(encoding="utf-8")
+    )
+    assert actual_transcript == golden_transcript
+
+
 def test_agent_controller_stops_safely_when_supervised_policy_denies_known_shell_tool(
     auto_read_policy: ApprovalPolicy,
 ) -> None:

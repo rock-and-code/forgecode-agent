@@ -1,0 +1,33 @@
+[
+  {
+    "data": {
+      "goal": "Run ls"
+    },
+    "type": "run_started"
+  },
+  {
+    "data": {
+      "messages": [
+        {
+          "content": "Run ls",
+          "role": "user"
+        }
+      ]
+    },
+    "type": "model_requested"
+  },
+  {
+    "data": {
+      "error_type": "MalformedModelResponse"
+    },
+    "type": "model_error"
+  },
+  {
+    "data": {
+      "completed": false,
+      "final_answer": "Run ls",
+      "stop_reason": "model_error"
+    },
+    "type": "run_completed"
+  }
+]
