@@ -1,0 +1,33 @@
+[
+  {
+    "data": {
+      "goal": "Provide the final answer"
+    },
+    "type": "run_started"
+  },
+  {
+    "data": {
+      "messages": [
+        {
+          "content": "Provide the final answer",
+          "role": "user"
+        }
+      ]
+    },
+    "type": "model_requested"
+  },
+  {
+    "data": {
+      "content": "The answer is ready.",
+      "tool_intents": []
+    },
+    "type": "model_responded"
+  },
+  {
+    "data": {
+      "completed": true,
+      "final_answer": "The answer is ready."
+    },
+    "type": "run_completed"
+  }
+]
