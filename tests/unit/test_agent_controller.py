@@ -365,6 +365,13 @@ def test_agent_controller_prioritizes_max_iterations_zero_before_multiple_tool_c
     assert result.iterations == 0
     assert result.stop_reason == "max_iterations"
     assert registry.calls == []
+    actual_transcript = [event.to_dict(exclude={"timestamp"}) for event in ledger.events]
+    golden_transcript = json.loads(
+        (GOLDEN_DIR / "max_iterations_zero_multiple_tool_calls.json").read_text(encoding="utf-8")
+    )
+    assert actual_transcript == golden_transcript
+    assert "tool_call_requested" not in [event["type"] for event in actual_transcript]
+    assert "tool_call_completed" not in [event["type"] for event in actual_transcript]
     assert [event.type for event in ledger.events] == [
         "run_started",
         "model_requested",
