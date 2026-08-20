@@ -6,6 +6,7 @@ import signal
 
 import pytest
 
+import forgecode_agent.ledger as ledger_module
 from forgecode_agent.ledger import RunLedger
 
 
@@ -37,12 +38,83 @@ def test_write_jsonl_persists_ordered_events_with_run_id_and_stable_keys(tmp_pat
     assert [json.loads(line)["type"] for line in lines] == ["run_started", "run_completed"]
 
 
+def test_write_jsonl_preserves_existing_destination_on_later_serialization_failure(tmp_path) -> None:
+    ledger = RunLedger(run_id="atomic-serialization-test")
+    ledger.append("run_started", {"status": "new"})
+    ledger.append("run_failed", {"unsupported": object()})
+    output_path = tmp_path / "ledger.jsonl"
+    original = "existing ledger contents\n"
+    output_path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(TypeError, match="not JSON serializable"):
+        ledger.write_jsonl(output_path)
+
+    assert output_path.read_text(encoding="utf-8") == original
+    assert list(tmp_path.iterdir()) == [output_path]
+
+
 def test_write_jsonl_does_not_normalize_serialization_type_error(tmp_path) -> None:
     ledger = RunLedger(run_id="serialization-type-error-test")
     ledger.append("run_started", {"unsupported": object()})
 
     with pytest.raises(TypeError, match="not JSON serializable"):
         ledger.write_jsonl(tmp_path / "ledger.jsonl")
+
+
+def test_write_jsonl_uses_random_exclusive_temporary_name(tmp_path, monkeypatch) -> None:
+    ledger = RunLedger(run_id="random-temp-test")
+    ledger.append("run_started", {"status": "new"})
+    output_path = tmp_path / "ledger.jsonl"
+    opened_exclusive_names = []
+    original_open = os.open
+
+    def recording_open(path, flags, *args, **kwargs):
+        if flags & os.O_EXCL:
+            opened_exclusive_names.append(path)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(ledger_module.secrets, "token_hex", lambda nbytes: "secure-token")
+    monkeypatch.setattr(os, "open", recording_open)
+
+    ledger.write_jsonl(output_path)
+
+    assert opened_exclusive_names == [".ledger.jsonl.tmp-secure-token"]
+
+
+def test_write_jsonl_preserves_existing_destination_mode_when_umask_masks_creation(tmp_path) -> None:
+    ledger = RunLedger(run_id="mode-preservation-test")
+    ledger.append("run_started", {"status": "new"})
+    output_path = tmp_path / "ledger.jsonl"
+    output_path.write_text("existing\n", encoding="utf-8")
+    output_path.chmod(0o666)
+
+    previous_umask = os.umask(0o077)
+    try:
+        ledger.write_jsonl(output_path)
+    finally:
+        os.umask(previous_umask)
+
+    assert output_path.stat().st_mode & 0o777 == 0o666
+
+
+@pytest.mark.parametrize("unsupported_error", [NotImplementedError, TypeError])
+def test_write_jsonl_normalizes_unsupported_replace_errors(tmp_path, monkeypatch, unsupported_error) -> None:
+    output_path = tmp_path / "ledger.jsonl"
+    ledger = RunLedger(run_id="unsupported-replace-test")
+    ledger.append("run_started", {"status": "new"})
+
+    def unsupported_replace(*args, **kwargs):
+        raise unsupported_error("unsupported descriptor-relative replace")
+
+    monkeypatch.setattr(os, "replace", unsupported_replace)
+
+    with pytest.raises(ValueError) as exc_info:
+        ledger.write_jsonl(output_path)
+
+    assert str(exc_info.value) == "Cannot write JSONL ledger file/path"
+    assert exc_info.value.__cause__ is None
+    assert not output_path.exists()
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_write_jsonl_rejects_symlink_output_without_modifying_target(tmp_path) -> None:

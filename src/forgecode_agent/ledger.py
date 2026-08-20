@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import stat
 from copy import deepcopy
 from dataclasses import dataclass
@@ -186,8 +187,17 @@ class RunLedger:
         output_path = Path(path)
         key_fragments = DEFAULT_REDACT_KEYS if redact_keys is None else DEFAULT_REDACT_KEYS | redact_keys
 
+        serialized_rows = []
+        for event in self.events:
+            row = event.to_dict() | {"run_id": self.run_id}
+            row["data"] = _redact(row["data"], key_fragments)
+            serialized_rows.append(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
+
         file_descriptor = -1
         parent_descriptor = -1
+        temporary_name: str | None = None
+        destination_mode = 0o666
+        destination_exists = False
         try:
             def open_descriptor(*args: Any, **kwargs: Any) -> int:
                 try:
@@ -219,25 +229,56 @@ class RunLedger:
                 os.close(parent_descriptor)
                 parent_descriptor = next_descriptor
 
-            file_descriptor = open_descriptor(
-                output_path.name,
-                os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NONBLOCK | nofollow,
-                0o666,
-                dir_fd=parent_descriptor,
-            )
-            file_stat = os.fstat(file_descriptor)
-            if not stat.S_ISREG(file_stat.st_mode):
+            try:
+                destination_descriptor = open_descriptor(
+                    output_path.name,
+                    os.O_WRONLY | os.O_NONBLOCK | nofollow,
+                    dir_fd=parent_descriptor,
+                )
+            except FileNotFoundError:
+                destination_descriptor = -1
+            if destination_descriptor != -1:
+                try:
+                    destination_stat = os.fstat(destination_descriptor)
+                    if not stat.S_ISREG(destination_stat.st_mode):
+                        raise OSError
+                    destination_mode = stat.S_IMODE(destination_stat.st_mode)
+                    destination_exists = True
+                finally:
+                    os.close(destination_descriptor)
+
+            for attempt in range(100):
+                temporary_name = f".{output_path.name}.tmp-{secrets.token_hex(16)}"
+                try:
+                    file_descriptor = open_descriptor(
+                        temporary_name,
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NONBLOCK | nofollow,
+                        destination_mode,
+                        dir_fd=parent_descriptor,
+                    )
+                    break
+                except FileExistsError:
+                    temporary_name = None
+            if file_descriptor == -1 or temporary_name is None:
                 raise OSError
+            if destination_exists:
+                os.fchmod(file_descriptor, destination_mode)
+
             with os.fdopen(file_descriptor, "w", encoding="utf-8") as file:
                 file_descriptor = -1
-                for event in self.events:
-                    row = event.to_dict() | {"run_id": self.run_id}
-                    row["data"] = _redact(row["data"], key_fragments)
-                    file.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
-        except OSError:
+                for row in serialized_rows:
+                    file.write(row)
+            os.replace(temporary_name, output_path.name, src_dir_fd=parent_descriptor, dst_dir_fd=parent_descriptor)
+            temporary_name = None
+        except (OSError, NotImplementedError, TypeError):
             raise ValueError("Cannot write JSONL ledger file/path") from None
         finally:
             if file_descriptor != -1:
                 os.close(file_descriptor)
+            if temporary_name is not None and parent_descriptor != -1:
+                try:
+                    os.unlink(temporary_name, dir_fd=parent_descriptor)
+                except OSError:
+                    pass
             if parent_descriptor != -1:
                 os.close(parent_descriptor)
