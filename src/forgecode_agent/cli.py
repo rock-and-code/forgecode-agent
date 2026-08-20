@@ -73,6 +73,8 @@ def _write_audit_event(path: Path, command: str, outcome: str) -> None:
         descriptor = None
         with audit_log:
             audit_log.write(json.dumps(event, sort_keys=True) + "\n")
+            audit_log.flush()
+            os.fsync(audit_log.fileno())
     finally:
         if descriptor is not None:
             os.close(descriptor)

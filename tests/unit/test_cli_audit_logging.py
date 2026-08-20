@@ -34,6 +34,22 @@ def test_main_writes_jsonl_audit_event_for_successful_command(tmp_path, monkeypa
     }
 
 
+def test_main_fsyncs_audit_descriptor_and_writes_event(tmp_path, monkeypatch) -> None:
+    audit_log = tmp_path / "audit.jsonl"
+    fsync_calls: list[int] = []
+
+    def record_fsync(descriptor: int) -> None:
+        fsync_calls.append(descriptor)
+        os.fstat(descriptor)
+
+    monkeypatch.setattr(cli.os, "fsync", record_fsync)
+
+    assert cli.main(["status", "--workspace", str(tmp_path), "--audit-log", str(audit_log)]) == 0
+
+    assert len(fsync_calls) == 1
+    assert read_event(audit_log)["command"] == "status"
+
+
 def test_main_writes_jsonl_audit_event_for_failed_command(tmp_path, capsys) -> None:
     audit_log = tmp_path / "audit.jsonl"
 
