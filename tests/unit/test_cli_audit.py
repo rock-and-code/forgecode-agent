@@ -9,18 +9,26 @@ from pathlib import Path
 from forgecode_agent import cli
 
 
-def test_audit_prints_most_recent_events_in_jsonl_order(tmp_path, capsys) -> None:
+def test_audit_prints_last_limit_events_as_golden_sorted_key_jsonl(tmp_path, capsys) -> None:
     audit_log = tmp_path / "audit.jsonl"
-    events = [
-        {"command": "status", "outcome": "success", "timestamp": "one"},
-        {"command": "config", "outcome": "failure", "timestamp": "two"},
-        {"command": "doctor", "outcome": "success", "timestamp": "three"},
-    ]
-    audit_log.write_text("".join(json.dumps(event) + "\n" for event in events), encoding="utf-8")
+    audit_log.write_text(
+        "".join(
+            json.dumps(event) + "\n"
+            for event in [
+                {"zeta": "first", "alpha": 1, "event": "old"},
+                {"zeta": "second", "alpha": 2, "event": "middle"},
+                {"zeta": "last", "alpha": 3, "event": "new"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    golden_transcript = (Path(__file__).parents[1] / "golden" / "audit_limit_two.jsonl").read_text(
+        encoding="utf-8"
+    )
 
     assert cli.main(["audit", "--audit-log", str(audit_log), "--limit", "2"]) == 0
 
-    assert capsys.readouterr().out == "".join(json.dumps(event) + "\n" for event in events[-2:])
+    assert capsys.readouterr().out == golden_transcript
 
 
 def test_audit_uses_small_default_limit(tmp_path, capsys) -> None:
