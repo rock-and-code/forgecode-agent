@@ -31,6 +31,23 @@ def test_audit_prints_last_limit_events_as_golden_sorted_key_jsonl(tmp_path, cap
     assert capsys.readouterr().out == golden_transcript
 
 
+def test_audit_reports_malformed_json_as_golden_error_transcript(tmp_path, capsys) -> None:
+    audit_log = tmp_path / "audit.jsonl"
+    audit_log.write_text(
+        json.dumps({"event": "valid"}) + "\n" + '{"malformed": "do not disclose"' + "\n",
+        encoding="utf-8",
+    )
+    golden_transcript = (Path(__file__).parents[1] / "golden" / "audit_malformed_json.txt").read_text(
+        encoding="utf-8"
+    )
+
+    assert cli.main(["audit", "--audit-log", str(audit_log), "--limit", "2"]) == 1
+
+    output = capsys.readouterr().out
+    assert output == golden_transcript
+    assert "do not disclose" not in output
+
+
 def test_audit_uses_small_default_limit(tmp_path, capsys) -> None:
     audit_log = tmp_path / "audit.jsonl"
     events = [{"number": number} for number in range(6)]
