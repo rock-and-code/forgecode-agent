@@ -58,12 +58,18 @@ def test_audit_uses_small_default_limit(tmp_path, capsys) -> None:
     assert capsys.readouterr().out == "".join(json.dumps(event) + "\n" for event in events[-5:])
 
 
-def test_audit_reports_missing_log_without_creating_or_auditing_it(tmp_path, capsys) -> None:
-    audit_log = tmp_path / "missing.jsonl"
+def test_audit_reports_missing_log_as_golden_error_transcript_without_creating_it(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    audit_log = Path("missing.jsonl")
+    golden_transcript = (Path(__file__).parents[1] / "golden" / "audit_missing_log.txt").read_text(
+        encoding="utf-8"
+    )
 
     assert cli.main(["audit", "--audit-log", str(audit_log)]) == 1
 
-    assert capsys.readouterr().out == f"audit log missing: {audit_log}\n"
+    assert capsys.readouterr().out == golden_transcript
     assert not audit_log.exists()
 
 
