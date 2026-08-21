@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -117,17 +118,22 @@ def test_audit_rejects_fifo_without_blocking(tmp_path) -> None:
     assert "regular file" in result.stdout
 
 
-def test_audit_rejects_symlink_log(tmp_path, capsys) -> None:
-    target = tmp_path / "secret.jsonl"
-    audit_log = tmp_path / "audit.jsonl"
+def test_audit_rejects_symlink_log_as_golden_error_transcript(tmp_path, capsys, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    target = Path("secret.jsonl")
+    audit_log = Path("audit.jsonl")
     target.write_text(json.dumps({"secret": "do not disclose"}) + "\n", encoding="utf-8")
     audit_log.symlink_to(target)
+    golden_transcript = (Path(__file__).parents[1] / "golden" / "audit_symlink_log.txt").read_text(
+        encoding="utf-8"
+    )
 
     assert cli.main(["audit", "--audit-log", str(audit_log)]) == 1
 
     output = capsys.readouterr().out
+    output = re.sub(r"\[Errno \d+\]", "[Errno <platform>]", output)
+    assert output == golden_transcript
     assert "do not disclose" not in output
-    assert "audit log unavailable" in output or "audit log missing" in output
 
 
 def test_audit_reports_symlink_loop_parent_without_traceback(tmp_path, capsys) -> None:
