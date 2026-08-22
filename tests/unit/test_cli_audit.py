@@ -136,13 +136,22 @@ def test_audit_rejects_symlink_log_as_golden_error_transcript(tmp_path, capsys, 
     assert "do not disclose" not in output
 
 
-def test_audit_reports_symlink_loop_parent_without_traceback(tmp_path, capsys) -> None:
-    loop = tmp_path / "loop"
+def test_audit_reports_symlink_loop_parent_as_golden_error_transcript_without_traceback(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "absolute", lambda path: path)
+    loop = Path("loop")
     loop.symlink_to(loop, target_is_directory=True)
     audit_log = loop / "audit.jsonl"
+    golden_transcript = (
+        Path(__file__).parents[1] / "golden" / "audit_symlink_loop_parent.txt"
+    ).read_text(encoding="utf-8")
 
     assert cli.main(["audit", "--audit-log", str(audit_log)]) == 1
 
     output = capsys.readouterr().out
+    output = re.sub(r"\[Errno \d+\]", "[Errno <platform>]", output)
+    assert output == golden_transcript
     assert "audit log unavailable" in output
     assert "Traceback" not in output
