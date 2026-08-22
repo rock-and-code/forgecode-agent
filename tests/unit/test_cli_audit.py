@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from forgecode_agent import cli
 
 
@@ -46,6 +48,40 @@ def test_audit_reports_malformed_json_as_golden_error_transcript(tmp_path, capsy
 
     output = capsys.readouterr().out
     assert output == golden_transcript
+    assert "do not disclose" not in output
+
+
+@pytest.mark.parametrize(
+    "non_object_value",
+    [
+        ["unrelated payload data", {"secret": "do not disclose"}],
+        "unrelated payload data",
+    ],
+    ids=["array", "string"],
+)
+def test_audit_reports_non_object_json_as_golden_error_transcript_without_traceback(
+    non_object_value, tmp_path, capsys, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    audit_log = Path("audit.jsonl")
+    audit_log.write_text(
+        json.dumps({"event": "valid"})
+        + "\n"
+        + json.dumps(non_object_value)
+        + "\n",
+        encoding="utf-8",
+    )
+    golden_transcript = (
+        Path(__file__).parents[1] / "golden" / "audit_non_object_json.txt"
+    ).read_text(encoding="utf-8")
+
+    assert cli.main(["audit", "--audit-log", str(audit_log), "--limit", "2"]) == 1
+
+    output = capsys.readouterr().out
+    assert output == golden_transcript
+    assert "audit event on line 2 is not an object" in output
+    assert "Traceback" not in output
+    assert "unrelated payload data" not in output
     assert "do not disclose" not in output
 
 
