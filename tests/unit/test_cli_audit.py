@@ -23,6 +23,17 @@ def test_audit_rejects_zero_limit_as_golden_error_transcript(capsys) -> None:
     assert captured.out + captured.err == golden_transcript
 
 
+def test_audit_rejects_non_integer_limit_as_golden_error_transcript(capsys) -> None:
+    golden_transcript = (
+        Path(__file__).parents[1] / "golden" / "audit_limit_non_integer_invalid.txt"
+    ).read_text(encoding="utf-8")
+
+    assert cli.main(["audit", "--audit-log", "audit.jsonl", "--limit", "not-an-integer"]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out + captured.err == golden_transcript
+
+
 def test_audit_prints_last_limit_events_as_golden_sorted_key_jsonl(tmp_path, capsys) -> None:
     audit_log = tmp_path / "audit.jsonl"
     audit_log.write_text(

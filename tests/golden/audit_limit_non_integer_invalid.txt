@@ -1,0 +1,4 @@
+usage: forgecode audit [-h] --audit-log AUDIT_LOG [--limit LIMIT]
+forgecode audit: error: argument --limit: invalid _positive_limit value: 'not-an-integer'
+usage: forgecode audit [-h] --audit-log AUDIT_LOG [--limit LIMIT]
+forgecode audit: error: argument --limit: invalid _positive_limit value: 'not-an-integer'
