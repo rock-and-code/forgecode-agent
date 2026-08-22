@@ -1,0 +1,4 @@
+usage: forgecode audit [-h] --audit-log AUDIT_LOG [--limit LIMIT]
+forgecode audit: error: argument --limit: limit must be at least 1
+usage: forgecode audit [-h] --audit-log AUDIT_LOG [--limit LIMIT]
+forgecode audit: error: argument --limit: limit must be at least 1
