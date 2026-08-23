@@ -132,6 +132,19 @@ def test_audit_reports_missing_log_as_golden_error_transcript_without_creating_i
     assert not audit_log.exists()
 
 
+def test_audit_reports_directory_log_as_golden_error_transcript(tmp_path, capsys, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    audit_log = Path("audit.jsonl")
+    audit_log.mkdir()
+    golden_transcript = (
+        Path(__file__).parents[1] / "golden" / "audit_directory_log.txt"
+    ).read_text(encoding="utf-8")
+
+    assert cli.main(["audit", "--audit-log", str(audit_log)]) == 1
+
+    assert capsys.readouterr().out == golden_transcript
+
+
 def test_audit_tail_does_not_read_entire_file_into_memory(tmp_path, monkeypatch) -> None:
     audit_log = tmp_path / "audit.jsonl"
     audit_log.write_text(json.dumps({"number": 1}) + "\n", encoding="utf-8")
