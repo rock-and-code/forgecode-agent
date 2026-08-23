@@ -107,6 +107,24 @@ def test_audit_reports_non_object_json_as_golden_error_transcript_without_traceb
     assert "do not disclose" not in output
 
 
+def test_audit_reports_invalid_utf8_as_golden_error_transcript_without_traceback(
+    tmp_path, capsys
+) -> None:
+    audit_log = tmp_path / "audit.jsonl"
+    audit_log.write_bytes(b"\xff\n")
+    golden_transcript = (
+        Path(__file__).parents[1] / "golden" / "audit_invalid_utf8.txt"
+    ).read_text(encoding="utf-8")
+
+    assert cli.main(["audit", "--audit-log", str(audit_log)]) == 1
+
+    output = capsys.readouterr().out
+    assert output == golden_transcript
+    assert "audit log unavailable" in output
+    assert "Traceback" not in output
+    assert b"\xff\n" not in output.encode("utf-8")
+
+
 def test_audit_uses_small_default_limit(tmp_path, capsys) -> None:
     audit_log = tmp_path / "audit.jsonl"
     events = [{"number": number} for number in range(6)]
