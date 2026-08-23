@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -188,23 +189,48 @@ def test_audit_reads_log_through_canonicalized_parent_path(tmp_path, capsys) -> 
     assert capsys.readouterr().out == json.dumps({"ok": True}) + "\n"
 
 
-def test_audit_rejects_fifo_without_blocking(tmp_path) -> None:
-    audit_log = tmp_path / "audit.jsonl"
+def test_audit_rejects_fifo_without_blocking_as_golden_error_transcript(tmp_path) -> None:
     if not hasattr(os, "mkfifo"):
-        return
-    os.mkfifo(audit_log)
+        pytest.skip("os.mkfifo is unavailable on this platform")
+    audit_log = tmp_path / "audit.jsonl"
+    try:
+        os.mkfifo(audit_log)
+    except NotImplementedError:
+        pytest.skip("FIFO creation is not implemented on this platform")
+    except OSError as exc:
+        unsupported_fifo_errors = {errno.ENOSYS, errno.EOPNOTSUPP, errno.ENOTSUP}
+        if exc.errno in unsupported_fifo_errors:
+            pytest.skip(f"FIFO creation is unsupported on this platform: {exc}")
+        raise
 
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(__file__).parents[2] / "src")
     result = subprocess.run(
-        [sys.executable, "-c", "from forgecode_agent import cli; raise SystemExit(cli.main(__import__('sys').argv[1:]))", "audit", "--audit-log", str(audit_log)],
+        [
+            sys.executable,
+            "-c",
+            "from forgecode_agent import cli; raise SystemExit(cli.main(__import__('sys').argv[1:]))",
+            "audit",
+            "--audit-log",
+            str(audit_log),
+        ],
         cwd=str(tmp_path),
         capture_output=True,
         text=True,
-        timeout=2,
-        env={"PYTHONPATH": str(Path(__file__).parents[2] / "src")},
+        timeout=5,
+        env=env,
     )
 
+    golden_transcript = (
+        Path(__file__).parents[1] / "golden" / "audit_fifo_log.txt"
+    ).read_text(encoding="utf-8")
+    output = re.sub(r"\[Errno \d+\]", "[Errno <platform>]", result.stdout)
+    assert result.returncode != 0
     assert result.returncode == 1
-    assert "regular file" in result.stdout
+    assert result.stderr == ""
+    assert output == golden_transcript
+    assert "regular file" in output
+    assert str(audit_log) not in output
 
 
 def test_audit_rejects_symlink_log_as_golden_error_transcript(tmp_path, capsys, monkeypatch) -> None:
