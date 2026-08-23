@@ -35,6 +35,25 @@ def test_audit_rejects_non_integer_limit_as_golden_error_transcript(capsys) -> N
     assert captured.out + captured.err == golden_transcript
 
 
+def test_audit_reads_valid_final_event_without_trailing_newline_as_golden_transcript(
+    tmp_path, capsys
+) -> None:
+    audit_log = tmp_path / "audit.jsonl"
+    audit_log.write_text(
+        json.dumps({"zeta": "previous", "alpha": 1, "event": "old"})
+        + "\n"
+        + json.dumps({"zeta": "final", "alpha": 2, "event": "new"}),
+        encoding="utf-8",
+    )
+    golden_transcript = (
+        Path(__file__).parents[1] / "golden" / "audit_final_event_no_newline.jsonl"
+    ).read_text(encoding="utf-8")
+
+    assert cli.main(["audit", "--audit-log", str(audit_log), "--limit", "2"]) == 0
+
+    assert capsys.readouterr().out == golden_transcript
+
+
 def test_audit_prints_last_limit_events_as_golden_sorted_key_jsonl(tmp_path, capsys) -> None:
     audit_log = tmp_path / "audit.jsonl"
     audit_log.write_text(
