@@ -206,6 +206,42 @@ def test_audit_reports_permission_denied_regular_log_as_golden_error_transcript_
     assert "do not disclose" not in output
 
 
+def test_audit_reports_path_bearing_permission_denied_without_leaking_path_or_payload(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    if not hasattr(os, "O_NOFOLLOW") or os.open not in getattr(os, "supports_dir_fd", ()):
+        pytest.skip("Descriptor-relative no-follow file opening is unavailable on this platform")
+    monkeypatch.chdir(tmp_path)
+    sensitive_component = "customer-secret-token"
+    audit_log = Path(sensitive_component) / "audit.jsonl"
+    audit_log.parent.mkdir()
+    audit_log.write_text('{"event": "do not disclose"}\n', encoding="utf-8")
+    real_open = cli.os.open
+    denial_attempts = 0
+
+    def deny_audit_log(path, *args, **kwargs):
+        nonlocal denial_attempts
+        if path == audit_log.name and "dir_fd" in kwargs:
+            denial_attempts += 1
+            raise PermissionError(errno.EACCES, "Permission denied", str(audit_log))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(cli.os, "open", deny_audit_log)
+    golden_transcript = (
+        Path(__file__).parents[1] / "golden" / "audit_permission_denied_path.txt"
+    ).read_text(encoding="utf-8")
+
+    assert cli.main(["audit", "--audit-log", str(audit_log)]) == 1
+    assert denial_attempts == 1
+
+    output = capsys.readouterr().out
+    assert output == golden_transcript
+    assert "Traceback" not in output
+    assert str(audit_log) not in output
+    assert sensitive_component not in output
+    assert "do not disclose" not in output
+
+
 def test_audit_reports_directory_log_as_golden_error_transcript(tmp_path, capsys, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     audit_log = Path("audit.jsonl")

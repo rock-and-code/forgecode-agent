@@ -491,6 +491,9 @@ def _main_impl(argv: list[str] | None = None) -> int:
             if isinstance(exc, FileNotFoundError):
                 print(f"audit log missing: {args.audit_log}")
                 return 1
+            if isinstance(exc, PermissionError):
+                print("audit log unavailable: permission denied")
+                return 1
             print(f"audit log unavailable: {exc}")
             return 1
         for event in events:
